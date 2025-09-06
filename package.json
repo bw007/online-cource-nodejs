@@ -1,0 +1,27 @@
+{
+  "name": "online-cource-nodejs",
+  "version": "1.0.0",
+  "description": "Online Cource Platform",
+  "homepage": "https://github.com/bw007/online-cource-nodejs#readme",
+  "bugs": {
+    "url": "https://github.com/bw007/online-cource-nodejs/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bw007/online-cource-nodejs.git"
+  },
+  "license": "ISC",
+  "author": "Lazizbek Hasanov",
+  "type": "commonjs",
+  "main": "server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "nodemon src/server.js"
+  },
+  "dependencies": {
+    "express": "^5.1.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.10"
+  }
+}
