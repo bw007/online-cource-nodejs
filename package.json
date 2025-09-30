@@ -13,15 +13,47 @@
   "license": "ISC",
   "author": "Lazizbek Hasanov",
   "type": "commonjs",
-  "main": "server.js",
+  "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
     "dev": "nodemon src/server.js"
   },
   "dependencies": {
-    "express": "^5.1.0"
+    "bcryptjs": "^3.0.2",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.2",
+    "express": "^5.1.0",
+    "express-session": "^1.18.2",
+    "express-validator": "^7.2.1",
+    "helmet": "^8.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "module-alias": "^2.2.3",
+    "mongoose": "^8.18.0",
+    "morgan": "^1.10.1",
+    "multer": "^2.0.2",
+    "passport": "^0.7.0",
+    "passport-google-oauth20": "^2.0.0",
+    "swagger-jsdoc": "^6.2.8",
+    "swagger-ui-express": "^5.0.1",
+    "uuid": "^13.0.0",
+    "winston": "^3.17.0",
+    "xss": "^1.0.15"
   },
   "devDependencies": {
     "nodemon": "^3.1.10"
+  },
+  "_moduleAliases": {
+    "@": "./src",
+    "@config": "./src/config",
+    "@utils": "./src/utils",
+    "@models": "./src/models",
+    "@services": "./src/services",
+    "@controllers": "./src/controllers",
+    "@routes": "./src/routes",
+    "@middlewares": "./src/middlewares",
+    "@constants": "./src/constants",
+    "@uploads": "./uploads",
+    "@swagger": "./src/swagger"
   }
 }
