@@ -9,7 +9,6 @@ router.use(authenticate, requireStudent);
 
 // COURSE ENROLLMENT
 router.post('/courses/:courseId/enroll', asyncHandler(studentController.enrollInCourse));
-router.delete('/courses/:courseId/enroll', asyncHandler(studentController.unenrollFromCourse));
 
 // MY COURSES
 router.get('/my-courses', asyncHandler(studentController.getMyCourses));
