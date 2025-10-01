@@ -1,4 +1,4 @@
-// controllers/student.controller.js
+// src/controllers/student.controller.js
 const { courseErrors, commonErrors, lessonErrors } = require('@/constants/errors');
 const { courseSuccess, commonSuccess } = require('@/constants/success');
 const { Course, Lesson, Enrollment, Progress, User } = require('@/models');
@@ -13,19 +13,11 @@ class StudentController {
   /**
    * Enroll student in course
    * Creates enrollment record and updates course stats
-   * 
-   * @async
-   * @param {Object} req - Express request object
-   * @param {string} req.params.courseId - Course ID
-   * @param {Object} req.user - Authenticated user
-   * @param {Object} res - Express response object
-   * @returns {Object} JSON response
    */
   async enrollInCourse(req, res) {
     const { courseId } = req.params;
     const studentId = req.user.id;
     
-    // Check if course exists and is published
     const course = await Course.findOne({ 
       _id: courseId, 
       isPublished: true 
@@ -35,7 +27,6 @@ class StudentController {
       return ResponseFormatter.notFound(res, courseErrors.COURSE_NOT_FOUND);
     }
     
-    // Check if already enrolled
     const existingEnrollment = await Enrollment.findOne({
       student: studentId,
       course: courseId
@@ -45,18 +36,15 @@ class StudentController {
       return ResponseFormatter.conflict(res, courseErrors.COURSE_ALREADY_ENROLLED);
     }
     
-    // Create enrollment
     const enrollment = await Enrollment.create({
       student: studentId,
       course: courseId
     });
     
-    // Update course student count
     await Course.findByIdAndUpdate(courseId, {
       $inc: { studentsCount: 1 }
     });
     
-    // Add course to user's enrolled courses
     await User.findByIdAndUpdate(studentId, {
       $addToSet: { enrolledCourses: courseId }
     });
@@ -72,19 +60,11 @@ class StudentController {
   /**
    * Unenroll student from course
    * Removes enrollment and updates stats
-   * 
-   * @async
-   * @param {Object} req - Express request object
-   * @param {string} req.params.courseId - Course ID
-   * @param {Object} req.user - Authenticated user
-   * @param {Object} res - Express response object
-   * @returns {Object} JSON response
    */
   async unenrollFromCourse(req, res) {
     const { courseId } = req.params;
     const studentId = req.user.id;
     
-    // Find enrollment
     const enrollment = await Enrollment.findOne({
       student: studentId,
       course: courseId
@@ -94,18 +74,15 @@ class StudentController {
       return ResponseFormatter.notFound(res, courseErrors.COURSE_NOT_ENROLLED);
     }
     
-    // Delete enrollment and related progress
     await Promise.all([
       Enrollment.findByIdAndDelete(enrollment._id),
       Progress.deleteMany({ student: studentId, course: courseId })
     ]);
     
-    // Update course student count
     await Course.findByIdAndUpdate(courseId, {
       $inc: { studentsCount: -1 }
     });
     
-    // Remove course from user's enrolled courses
     await User.findByIdAndUpdate(studentId, {
       $pull: { enrolledCourses: courseId }
     });
@@ -118,12 +95,6 @@ class StudentController {
   /**
    * Get student's enrolled courses
    * Returns list of courses with progress
-   * 
-   * @async
-   * @param {Object} req - Express request object
-   * @param {Object} req.user - Authenticated user
-   * @param {Object} res - Express response object
-   * @returns {Object} JSON response with enrolled courses
    */
   async getMyCourses(req, res) {
     const studentId = req.user.id;
@@ -134,7 +105,10 @@ class StudentController {
     const enrollments = await Enrollment.find({ student: studentId })
       .populate({
         path: 'course',
-        populate: { path: 'lessonsCount' }
+        populate: { 
+          path: 'instructor',
+          select: 'name email'
+        }
       })
       .sort({ enrolledAt: -1 })
       .skip(skip)
@@ -142,7 +116,6 @@ class StudentController {
     
     const total = await Enrollment.countDocuments({ student: studentId });
     
-    // Add progress info for each course
     const coursesWithProgress = enrollments.map(enrollment => ({
       enrollment: {
         id: enrollment._id,
@@ -171,19 +144,12 @@ class StudentController {
   /**
    * Get enrolled course details with lessons
    * Shows course content for enrolled student
-   * 
-   * @async
-   * @param {Object} req - Express request object
-   * @param {string} req.params.courseId - Course ID
-   * @param {Object} req.user - Authenticated user
-   * @param {Object} res - Express response object
-   * @returns {Object} JSON response with course and lessons
    */
   async getEnrolledCourseDetail(req, res) {
     const { courseId } = req.params;
     const studentId = req.user.id;
     
-    // Check enrollment
+    // Check enrollment FIRST
     const enrollment = await Enrollment.findOne({
       student: studentId,
       course: courseId
@@ -194,7 +160,13 @@ class StudentController {
     }
     
     // Get course with lessons
-    const course = await Course.findById(courseId);
+    const course = await Course.findById(courseId)
+      .populate('instructor', 'name email');
+      
+    if (!course) {
+      return ResponseFormatter.notFound(res, courseErrors.COURSE_NOT_FOUND);
+    }
+    
     const lessons = await Lesson.find({ 
       course: courseId,
       isPublished: true 
@@ -228,7 +200,8 @@ class StudentController {
         enrollment: {
           progressPercentage: enrollment.progressPercentage,
           lastWatchedLesson: enrollment.lastWatchedLesson,
-          isCompleted: enrollment.isCompleted
+          isCompleted: enrollment.isCompleted,
+          enrolledAt: enrollment.enrolledAt
         },
         lessons: lessonsWithProgress
       }
@@ -236,18 +209,117 @@ class StudentController {
   }
 
   /**
-   * Watch lesson and update progress
-   * Records video watch progress and completion
+   * Get lesson for enrolled student
+   * Returns lesson with video access ONLY for enrolled students or preview lessons
    * 
-   * @async
-   * @param {Object} req - Express request object
-   * @param {string} req.params.lessonId - Lesson ID
-   * @param {Object} req.body - Request body
-   * @param {number} req.body.watchTime - Current watch time in seconds
-   * @param {number} req.body.duration - Total lesson duration
-   * @param {Object} req.user - Authenticated user
-   * @param {Object} res - Express response object
-   * @returns {Object} JSON response
+   * SECURITY: This is the critical access control point
+   */
+  async getEnrolledLesson(req, res) {
+    const { lessonId } = req.params;
+    const studentId = req.user.id;
+    
+    // Get lesson with course info
+    const lesson = await Lesson.findOne({
+      _id: lessonId,
+      isPublished: true
+    }).populate({
+      path: 'course',
+      select: 'title isPublished', // ← CRITICAL: isPublished MUST be selected
+      populate: {
+        path: 'instructor',
+        select: 'name email'
+      }
+    });   
+    
+    if (!lesson) {
+      return ResponseFormatter.notFound(res, lessonErrors.LESSON_NOT_FOUND);
+    }
+    
+    if (!lesson.course.isPublished) {
+      return ResponseFormatter.notFound(res, courseErrors.COURSE_INACTIVE);
+    }
+    
+    // CRITICAL: Check access permissions
+    let hasAccess = false;
+    let accessReason = null;
+    
+    // Option 1: Preview lesson (free access)
+    if (lesson.isPreview) {
+      hasAccess = true;
+      accessReason = 'preview';
+    } 
+    // Option 2: Enrolled student (paid access)
+    else {
+      const enrollment = await Enrollment.findOne({
+        student: studentId,
+        course: lesson.course._id
+      });
+      
+      if (enrollment) {
+        hasAccess = true;
+        accessReason = 'enrolled';
+      }
+    }
+    
+    // DENY ACCESS if not enrolled and not preview
+    if (!hasAccess) {
+      logger.warn(`Access denied: Student ${studentId} attempted to access lesson ${lessonId} without enrollment`);
+      return ResponseFormatter.forbidden(res, {
+        message: 'You must enroll in this course to access this lesson',
+        code: 'LESSON_ACCESS_DENIED'
+      });
+    }
+    
+    // Get student's progress for this lesson
+    const progress = await Progress.findOne({
+      student: studentId,
+      lesson: lessonId
+    });
+    
+    // Prepare response with video URLs (only for enrolled/preview)
+    const responseData = {
+      id: lesson._id,
+      title: lesson.title,
+      description: lesson.description,
+      duration: lesson.duration,
+      formattedDuration: lesson.formattedDuration,
+      order: lesson.order,
+      isPreview: lesson.isPreview,
+      course: lesson.course,
+      video: {
+        defaultQuality: lesson.video.defaultQuality,
+        availableQualities: Object.keys(lesson.video.qualities).filter(
+          quality => lesson.video.qualities[quality]
+        ),
+        videoUrl: lesson.video.qualities[lesson.video.defaultQuality] || 
+                  lesson.video.originalUrl
+      },
+      progress: progress ? {
+        watchTime: progress.watchTime,
+        watchPercentage: progress.watchPercentage,
+        isCompleted: progress.isCompleted
+      } : {
+        watchTime: 0,
+        watchPercentage: 0,
+        isCompleted: false
+      },
+      accessInfo: {
+        hasAccess: true,
+        reason: accessReason
+      }
+    };
+    
+    logger.info(`Lesson accessed: Student ${studentId}, Lesson ${lessonId}, Access: ${accessReason}`);
+    
+    return ResponseFormatter.success(res, {
+      message: 'Lesson retrieved successfully',
+      data: { lesson: responseData }
+    });
+  }
+
+  /**
+   * Update lesson progress
+   * Records video watch progress and completion
    */
   async updateLessonProgress(req, res) {
     const { lessonId } = req.params;
@@ -261,20 +333,24 @@ class StudentController {
       });
     }
     
-    // Get lesson and verify access
+    // Get lesson and verify it exists
     const lesson = await Lesson.findById(lessonId);
     if (!lesson) {
       return ResponseFormatter.notFound(res, lessonErrors.LESSON_NOT_FOUND);
     }
     
-    // Check if student is enrolled in the course
+    // 🔒 CRITICAL: Check if student is enrolled in the course
     const enrollment = await Enrollment.findOne({
       student: studentId,
       course: lesson.course
     });
     
-    if (!enrollment) {
-      return ResponseFormatter.forbidden(res, courseErrors.COURSE_NOT_ENROLLED);
+    if (!enrollment && !lesson.isPreview) {
+      logger.warn(`Progress update denied: Student ${studentId} not enrolled in course for lesson ${lessonId}`);
+      return ResponseFormatter.forbidden(res, {
+        message: 'You must enroll in this course to track progress',
+        code: 'COURSE_NOT_ENROLLED'
+      });
     }
     
     // Calculate watch percentage
@@ -298,25 +374,26 @@ class StudentController {
       { upsert: true, new: true }
     );
     
-    // Update enrollment progress if lesson completed
-    if (isCompleted) {
-      await Enrollment.findByIdAndUpdate(enrollment._id, {
-        $addToSet: { completedLessons: lessonId },
-        lastWatchedLesson: lessonId,
-        lastActivityAt: new Date()
-      });
-      
-      // Calculate overall course progress
-      await this.updateCourseProgress(studentId, lesson.course);
-    } else {
-      // Update last activity
-      await Enrollment.findByIdAndUpdate(enrollment._id, {
-        lastWatchedLesson: lessonId,
-        lastActivityAt: new Date()
-      });
+    // Update enrollment progress if enrolled (not just preview)
+    if (enrollment) {
+      if (isCompleted) {
+        await Enrollment.findByIdAndUpdate(enrollment._id, {
+          $addToSet: { completedLessons: lessonId },
+          lastWatchedLesson: lessonId,
+          lastActivityAt: new Date()
+        });
+        
+        // Calculate overall course progress
+        await this.updateCourseProgress(studentId, lesson.course);
+      } else {
+        await Enrollment.findByIdAndUpdate(enrollment._id, {
+          lastWatchedLesson: lessonId,
+          lastActivityAt: new Date()
+        });
+      }
     }
     
-    logger.info(`Progress updated: Student ${studentId}, Lesson ${lessonId}, ${watchPercentage}%`);
+    logger.info(`Progress updated: Student ${studentId}, Lesson ${lessonId}, ${watchPercentage.toFixed(1)}%`);
     
     return ResponseFormatter.success(res, {
       message: 'Progress updated successfully',
@@ -327,13 +404,8 @@ class StudentController {
   /**
    * Update overall course progress percentage
    * Helper method to calculate and update course completion
-   * 
-   * @async
-   * @param {string} studentId - Student ID
-   * @param {string} courseId - Course ID
    */
   async updateCourseProgress(studentId, courseId) {
-    // Get total lessons and completed lessons count
     const totalLessons = await Lesson.countDocuments({ 
       course: courseId,
       isPublished: true 
@@ -358,81 +430,8 @@ class StudentController {
         completedAt: isCompleted ? new Date() : null
       }
     );
-  }
-
-  /**
-   * Get lesson for enrolled student
-   * Returns lesson with video access for enrolled students
-   * 
-   * @async
-   * @param {Object} req - Express request object
-   * @param {string} req.params.lessonId - Lesson ID
-   * @param {Object} req.user - Authenticated user
-   * @param {Object} res - Express response object
-   * @returns {Object} JSON response with lesson data
-   */
-  async getEnrolledLesson(req, res) {
-    const { lessonId } = req.params;
-    const studentId = req.user.id;
     
-    const lesson = await Lesson.findOne({
-      _id: lessonId,
-      isPublished: true
-    }).populate('course', 'title');
-    
-    if (!lesson) {
-      return ResponseFormatter.notFound(res, lessonErrors.LESSON_NOT_FOUND);
-    }
-    
-    // Check enrollment or preview access
-    let hasAccess = lesson.isPreview;
-    
-    if (!hasAccess) {
-      const enrollment = await Enrollment.findOne({
-        student: studentId,
-        course: lesson.course._id
-      });
-      hasAccess = !!enrollment;
-    }
-    
-    if (!hasAccess) {
-      return ResponseFormatter.forbidden(res, lessonErrors.LESSON_ACCESS_DENIED);
-    }
-    
-    // Get student's progress for this lesson
-    const progress = await Progress.findOne({
-      student: studentId,
-      lesson: lessonId
-    });
-    
-    const responseData = {
-      id: lesson._id,
-      title: lesson.title,
-      description: lesson.description,
-      duration: lesson.duration,
-      formattedDuration: lesson.formattedDuration,
-      order: lesson.order,
-      course: lesson.course,
-      video: {
-        defaultQuality: lesson.video.defaultQuality,
-        availableQualities: Object.keys(lesson.video.qualities),
-        videoUrl: lesson.video.qualities[lesson.video.defaultQuality] || lesson.video.originalUrl
-      },
-      progress: progress ? {
-        watchTime: progress.watchTime,
-        watchPercentage: progress.watchPercentage,
-        isCompleted: progress.isCompleted
-      } : {
-        watchTime: 0,
-        watchPercentage: 0,
-        isCompleted: false
-      }
-    };
-    
-    return ResponseFormatter.success(res, {
-      message: 'Lesson retrieved successfully',
-      data: { lesson: responseData }
-    });
+    logger.info(`Course progress updated: Student ${studentId}, Course ${courseId}, ${progressPercentage}%`);
   }
 }
 
