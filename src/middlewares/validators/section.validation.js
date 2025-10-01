@@ -60,33 +60,21 @@ const sectionValidators = {
   deleteSection: [
     param('id')
       .isMongoId()
-      .withMessage('Invalid section ID'),
-    query('force')
-      .optional()
-      .isIn(['true', 'false'])
-      .withMessage('Force parameter must be true or false')
+      .withMessage('Invalid section ID')
   ],
 
   // Publish section validation
   publishSection: [
     param('id')
       .isMongoId()
-      .withMessage('Invalid section ID'),
-    query('publishLessons')
-      .optional()
-      .isIn(['true', 'false'])
-      .withMessage('publishLessons parameter must be true or false')
+      .withMessage('Invalid section ID')
   ],
 
   // Unpublish section validation
   unpublishSection: [
-    param('id')
-      .isMongoId()
-      .withMessage('Invalid section ID'),
-    query('unpublishLessons')
-      .optional()
-      .isIn(['true', 'false'])
-      .withMessage('unpublishLessons parameter must be true or false')
+  param('id')
+    .isMongoId()
+    .withMessage('Invalid section ID')
   ],
 
   // Reorder sections validation
