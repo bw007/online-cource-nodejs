@@ -1,6 +1,6 @@
 const { lessonErrors, courseErrors, commonErrors } = require('@/constants/errors');
 const { lessonSuccess, commonSuccess } = require('@/constants/success');
-const { Course, Lesson } = require('@/models');
+const { Course, Lesson, Section } = require('@/models');
 const { ResponseFormatter, logger } = require('@/utils');
 
 /**
@@ -575,6 +575,173 @@ class LessonController {
       data: {
         updatedCount: updatedLessons.length,
         lessons: updatedLessons.sort((a, b) => a.order - b.order)
+      }
+    });
+  }
+
+  async createLessonInSection(req, res) {
+    const { sectionId } = req.params;
+    const { title, description, originalUrl, duration, order, isPreview } = req.body;
+    
+    const section = await Section.findById(sectionId);
+    if (!section) {
+      return ResponseFormatter.notFound(res, {
+        message: 'Section not found',
+        code: 'SECTION_NOT_FOUND'
+      });
+    }
+    
+    const courseId = section.course;
+    
+    if (!title || !originalUrl || !duration) {
+      return ResponseFormatter.badRequest(res, {
+        message: 'Title, video URL and duration are required',
+        code: 'MISSING_LESSON_DATA'
+      });
+    }
+    
+    let lessonOrder = order;
+    if (!lessonOrder) {
+      const lastLesson = await Lesson.findOne({ 
+        course: courseId,
+        section: sectionId 
+      }).sort({ order: -1 });
+      
+      lessonOrder = lastLesson ? lastLesson.order + 1 : 1;
+    }
+    
+    const existingLesson = await Lesson.findOne({
+      course: courseId,
+      section: sectionId,
+      order: lessonOrder
+    });
+    
+    if (existingLesson) {
+      return ResponseFormatter.conflict(res, {
+        message: 'Lesson with this order already exists in this section',
+        code: 'LESSON_ORDER_EXISTS'
+      });
+    }
+    
+    const lessonData = {
+      title: title.trim(),
+      description: description?.trim(),
+      course: courseId,
+      section: sectionId,
+      video: {
+        originalUrl: originalUrl.trim(),
+        defaultQuality: '720p',
+        qualities: {
+          '360p': null,
+          '720p': null,
+          '1080p': null
+        }
+      },
+      duration: parseInt(duration),
+      order: lessonOrder,
+      isPreview: isPreview || false,
+      isPublished: false
+    };
+    
+    const lesson = await Lesson.create(lessonData);
+    
+    logger.info(`Lesson created in section: ${lesson._id} in section ${sectionId}`);
+    
+    return ResponseFormatter.created(res, {
+      message: 'Lesson created successfully',
+      data: { lesson }
+    });
+  }
+
+  async moveLesson(req, res) {
+    const { id } = req.params;
+    const { sectionId, order } = req.body;
+    
+    const lesson = await Lesson.findById(id);
+    if (!lesson) {
+      return ResponseFormatter.notFound(res, {
+        message: 'Lesson not found',
+        code: 'LESSON_NOT_FOUND'
+      });
+    }
+    
+    if (sectionId) {
+      const section = await Section.findById(sectionId);
+      if (!section) {
+        return ResponseFormatter.notFound(res, {
+          message: 'Section not found',
+          code: 'SECTION_NOT_FOUND'
+        });
+      }
+      
+      if (section.course.toString() !== lesson.course.toString()) {
+        return ResponseFormatter.badRequest(res, {
+          message: 'Section must belong to the same course',
+          code: 'INVALID_SECTION'
+        });
+      }
+    }
+    
+    let newOrder = order;
+    if (!newOrder) {
+      const lastLesson = await Lesson.findOne({
+        course: lesson.course,
+        section: sectionId || null
+      }).sort({ order: -1 });
+      
+      newOrder = lastLesson ? lastLesson.order + 1 : 1;
+    }
+    
+    lesson.section = sectionId || null;
+    lesson.order = newOrder;
+    await lesson.save();
+    
+    logger.info(`Lesson moved: ${id} to section ${sectionId || 'none'}`);
+    
+    return ResponseFormatter.success(res, {
+      message: 'Lesson moved successfully',
+      data: { lesson }
+    });
+  }
+
+  async getCourseLessonsGrouped(req, res) {
+    const { courseId } = req.params;
+    
+    const course = await Course.findById(courseId);
+    if (!course) {
+      return ResponseFormatter.notFound(res, {
+        message: 'Course not found',
+        code: 'COURSE_NOT_FOUND'
+      });
+    }
+    
+    const sections = await Section.find({ course: courseId })
+      .sort({ order: 1 });
+    
+    const lessonsWithoutSection = await Lesson.find({
+      course: courseId,
+      section: null
+    }).sort({ order: 1 });
+    
+    const sectionsWithLessons = await Promise.all(
+      sections.map(async (section) => {
+        const lessons = await Lesson.find({
+          course: courseId,
+          section: section._id
+        }).sort({ order: 1 });
+        
+        return {
+          section: section.toObject(),
+          lessons
+        };
+      })
+    );
+    
+    return ResponseFormatter.success(res, {
+      message: 'Course content retrieved successfully',
+      data: {
+        sectionsWithLessons,
+        lessonsWithoutSection
       }
     });
   }
