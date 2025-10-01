@@ -84,7 +84,7 @@ LessonSchema.pre(/^find/, function(next) {
   if (!this.getOptions().populate) {
     this.populate({
       path: 'course',
-      select: 'title instructor'
+      select: 'title instructor isPublished'
     });
   }
   next();
