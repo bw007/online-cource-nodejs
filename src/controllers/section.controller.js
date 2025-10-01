@@ -267,21 +267,20 @@ class SectionController {
     });
   }
 
-  /**
-   * Delete section
-   * Admin deletes section (only if no lessons exist or with force flag)
-   * 
-   * @async
-   * @param {Object} req - Express request object
-   * @param {string} req.params.id - Section ID
-   * @param {string} req.query.force - Force delete with lessons (optional)
-   * @param {Object} res - Express response object
-   * @returns {Object} JSON response
-   */
+ /**
+ * Delete section
+ * Admin can only delete unpublished sections without lessons
+ * 
+ * @async
+ * @param {Object} req - Express request object
+ * @param {string} req.params.id - Section ID
+ * @param {Object} res - Express response object
+ * @returns {Object} JSON response
+ */
   async deleteSection(req, res) {
     const { id } = req.params;
-    const { force } = req.query;
     
+    // Find section
     const section = await Section.findById(id);
     if (!section) {
       return ResponseFormatter.notFound(res, {
@@ -290,54 +289,54 @@ class SectionController {
       });
     }
     
+    // Check if section is published
+    if (section.isPublished) {
+      return ResponseFormatter.badRequest(res, {
+        message: 'Cannot delete published section. Unpublish it first.',
+        code: 'CANNOT_DELETE_PUBLISHED_SECTION'
+      });
+    }
+    
+    // Check if section has lessons
     const lessonsCount = await Lesson.countDocuments({ section: id });
     
     if (lessonsCount > 0) {
-      if (force === 'true') {
-        await Lesson.deleteMany({ section: id });
-        await Section.findByIdAndDelete(id);
-        
-        logger.warn(`Section force deleted with ${lessonsCount} lessons: ${id} by admin ${req.user.id}`);
-        
-        return ResponseFormatter.success(res, {
-          message: `Section and ${lessonsCount} lesson(s) deleted successfully`,
-          data: {
-            deletedLessons: lessonsCount
-          }
-        });
-      } else {
-        return ResponseFormatter.badRequest(res, {
-          message: `Cannot delete section with ${lessonsCount} lesson(s). Use ?force=true to delete anyway.`,
-          code: 'SECTION_HAS_LESSONS',
-          data: { lessonsCount }
-        });
-      }
+      return ResponseFormatter.badRequest(res, {
+        message: `Cannot delete section with ${lessonsCount} lesson(s). Delete all lessons first.`,
+        code: 'SECTION_HAS_LESSONS',
+        data: { 
+          lessonsCount,
+          suggestion: 'Delete all lessons in this section before deleting the section'
+        }
+      });
     }
     
+    // Delete section
     await Section.findByIdAndDelete(id);
     
     logger.info(`Section deleted: ${id} by admin ${req.user.id}`);
     
     return ResponseFormatter.success(res, {
-      message: 'Section deleted successfully'
+      message: 'Section deleted successfully',
+      code: 'SECTION_DELETED'
     });
   }
-
+  
   /**
-   * Publish section
-   * Makes section visible to students
-   * 
-   * @async
-   * @param {Object} req - Express request object
-   * @param {string} req.params.id - Section ID
-   * @param {string} req.query.publishLessons - Publish all lessons too (optional)
-   * @param {Object} res - Express response object
-   * @returns {Object} JSON response
-   */
+ * Publish section
+ * Makes section visible to students
+ * Note: Lessons must be published separately
+ * 
+ * @async
+ * @param {Object} req - Express request object
+ * @param {string} req.params.id - Section ID
+ * @param {Object} res - Express response object
+ * @returns {Object} JSON response
+ */
   async publishSection(req, res) {
     const { id } = req.params;
-    const { publishLessons } = req.query;
     
+    // Find section
     const section = await Section.findById(id);
     if (!section) {
       return ResponseFormatter.notFound(res, {
@@ -346,6 +345,7 @@ class SectionController {
       });
     }
     
+    // Check if already published
     if (section.isPublished) {
       return ResponseFormatter.badRequest(res, {
         message: 'Section is already published',
@@ -353,47 +353,34 @@ class SectionController {
       });
     }
     
+    // Publish section
     section.isPublished = true;
     await section.save();
     
-    let publishedLessonsCount = 0;
-    
-    if (publishLessons === 'true') {
-      const result = await Lesson.updateMany(
-        { section: id, isPublished: false },
-        { isPublished: true }
-      );
-      publishedLessonsCount = result.modifiedCount;
-    }
-    
-    logger.info(`Section published: ${id}, lessons published: ${publishedLessonsCount} by admin ${req.user.id}`);
+    logger.info(`Section published: ${id} by admin ${req.user.id}`);
     
     return ResponseFormatter.success(res, {
-      message: publishLessons === 'true' 
-        ? `Section and ${publishedLessonsCount} lesson(s) published successfully`
-        : 'Section published successfully',
-      data: { 
-        section,
-        publishedLessons: publishLessons === 'true' ? publishedLessonsCount : 0
-      }
+      message: 'Section published successfully',
+      code: 'SECTION_PUBLISHED',
+      data: { section }
     });
   }
 
   /**
-   * Unpublish section
-   * Hides section from students
-   * 
-   * @async
-   * @param {Object} req - Express request object
-   * @param {string} req.params.id - Section ID
-   * @param {string} req.query.unpublishLessons - Unpublish all lessons too (optional)
-   * @param {Object} res - Express response object
-   * @returns {Object} JSON response
-   */
+ * Unpublish section
+ * Hides section from students
+ * Note: Lessons remain in their current state (published/unpublished)
+ * 
+ * @async
+ * @param {Object} req - Express request object
+ * @param {string} req.params.id - Section ID
+ * @param {Object} res - Express response object
+ * @returns {Object} JSON response
+ */
   async unpublishSection(req, res) {
     const { id } = req.params;
-    const { unpublishLessons } = req.query;
     
+    // Find section
     const section = await Section.findById(id);
     if (!section) {
       return ResponseFormatter.notFound(res, {
@@ -402,6 +389,7 @@ class SectionController {
       });
     }
     
+    // Check if already unpublished
     if (!section.isPublished) {
       return ResponseFormatter.badRequest(res, {
         message: 'Section is already unpublished',
@@ -409,29 +397,16 @@ class SectionController {
       });
     }
     
+    // Unpublish section
     section.isPublished = false;
     await section.save();
     
-    let unpublishedLessonsCount = 0;
-    
-    if (unpublishLessons === 'true') {
-      const result = await Lesson.updateMany(
-        { section: id, isPublished: true },
-        { isPublished: false }
-      );
-      unpublishedLessonsCount = result.modifiedCount;
-    }
-    
-    logger.info(`Section unpublished: ${id}, lessons unpublished: ${unpublishedLessonsCount} by admin ${req.user.id}`);
+    logger.info(`Section unpublished: ${id} by admin ${req.user.id}`);
     
     return ResponseFormatter.success(res, {
-      message: unpublishLessons === 'true'
-        ? `Section and ${unpublishedLessonsCount} lesson(s) unpublished successfully`
-        : 'Section unpublished successfully',
-      data: { 
-        section,
-        unpublishedLessons: unpublishLessons === 'true' ? unpublishedLessonsCount : 0
-      }
+      message: 'Section unpublished successfully',
+      code: 'SECTION_UNPUBLISHED',
+      data: { section }
     });
   }
 

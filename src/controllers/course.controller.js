@@ -1,7 +1,7 @@
 const { courseErrors, commonErrors } = require('@/constants/errors');
 const { ResponseFormatter, logger } = require('@/utils');
 const { ROLES } = require('@/constants/enums');
-const { Course, Lesson, Section } = require('@/models');
+const { Course, Lesson, Section, Instructor } = require('@/models');
 const { courseSuccess } = require('@/constants/success');
 
 /**
@@ -91,40 +91,39 @@ class CourseController {
    * }
    */
   async createCourse(req, res) {
-    const { title, description, price, category, thumbnail } = req.body;
+    const { title, description, price, category, thumbnail, instructorId } = req.body;
     
-    // Validate required fields
-    if (!title || !description) {
-      return ResponseFormatter.badRequest(res, courseErrors.MISSING_COURSE_DATA);
+    // Verify instructor exists
+    const instructor = await Instructor.findById(instructorId);
+    if (!instructor) {
+      return ResponseFormatter.notFound(res, {
+        message: 'Instructor not found',
+        code: 'INSTRUCTOR_NOT_FOUND'
+      });
     }
     
-    // Check if course with same title exists
-    const existingCourse = await Course.findOne({ 
-      title: { $regex: new RegExp(`^${title}$`, 'i') } 
-    });
-    
-    if (existingCourse) {
-      return ResponseFormatter.conflict(res, courseErrors.COURSE_TITLE_EXISTS);
+    if (!instructor.isActive) {
+      return ResponseFormatter.badRequest(res, {
+        message: 'Instructor is not active',
+        code: 'INSTRUCTOR_INACTIVE'
+      });
     }
     
-    const courseData = {
-      title: title.trim(),
-      description: description.trim(),
-      price: price || 0,
+    const course = await Course.create({
+      title,
+      description,
+      price,
       category,
       thumbnail,
-      instructor: req.user.id,
-      isPublished: false
-    };
-    
-    const course = await Course.create(courseData);
-    
-    logger.info(`Course created: ${course._id} by user ${req.user.id}`);
-    
-    return ResponseFormatter.created(res, {
-      ...courseSuccess.COURSE_CREATED,
-      data: { course }
+      instructor: instructorId  // ← Instructor ID
     });
+    
+    // Update instructor courses count
+    await Instructor.findByIdAndUpdate(instructorId, {
+      $inc: { coursesCount: 1 }
+    });
+    
+    return ResponseFormatter.created(res, { course });
   }
 
   /**
@@ -390,74 +389,52 @@ class CourseController {
    * @returns {Object} JSON response with course details
    */
   async getCourseDetailForStudent(req, res) {
-    const course = await Course.findOne({ 
-      _id: req.params.id, 
-      isPublished: true 
-    }).populate('lessonsCount');
+    const course = await Course.findOne({
+      _id: req.params.id,
+      isPublished: true
+    }).populate('instructor', 'name email');
     
     if (!course) {
       return ResponseFormatter.notFound(res, courseErrors.COURSE_NOT_FOUND);
     }
     
-    // Get published sections
-    const sections = await Section.find({ 
+    // Get published sections with lessons
+    const sections = await Section.find({
       course: course._id,
-      isPublished: true 
-    }).sort({ order: 1 });
+      isPublished: true
+    })
+    .sort({ order: 1 })
+    .lean();
     
-    // Get loose lessons (without section)
+    // Add lessons to each section
+    for (let section of sections) {
+      section.lessons = await Lesson.find({
+        section: section._id,
+        isPublished: true
+      })
+      .sort({ order: 1 })
+      .select('title duration isPreview order')
+      .lean();
+    }
+    
+    // Get loose lessons (not in any section)
     const looseLessons = await Lesson.find({
       course: course._id,
       section: null,
       isPublished: true
     })
     .sort({ order: 1 })
-    .select('title duration order isPreview');
+    .select('title duration isPreview order')
+    .lean();
     
-    // Get lessons grouped by section
-    const sectionsWithLessons = await Promise.all(
-      sections.map(async (section) => {
-        const lessons = await Lesson.find({
-          section: section._id,
-          isPublished: true
-        })
-        .sort({ order: 1 })
-        .select('title duration order isPreview');
-        
-        return {
-          section: {
-            id: section._id,
-            title: section.title,
-            description: section.description,
-            order: section.order
-          },
-          lessons: lessons.map(lesson => ({
-            id: lesson._id,
-            title: lesson.title,
-            duration: lesson.duration,
-            order: lesson.order,
-            isPreview: lesson.isPreview,
-            hasAccess: lesson.isPreview
-          }))
-        };
-      })
-    );
+    logger.info(`Public course detail retrieved: ${course._id}`);
     
     return ResponseFormatter.success(res, {
       ...courseSuccess.COURSE_FETCHED,
-      data: {
+      data: { 
         course,
-        content: {
-          sections: sectionsWithLessons,
-          looseLessons: looseLessons.map(lesson => ({
-            id: lesson._id,
-            title: lesson.title,
-            duration: lesson.duration,
-            order: lesson.order,
-            isPreview: lesson.isPreview,
-            hasAccess: lesson.isPreview
-          }))
-        }
+        sections,
+        looseLessons
       }
     });
   }

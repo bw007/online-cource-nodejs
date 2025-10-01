@@ -440,60 +440,68 @@ class LessonController {
   }
 
   /**
-   * Get lesson for student viewing
-   * Checks access permissions and returns appropriate video quality
+   * Get lesson for public viewing (Preview lessons only)
+   * Guest users can watch preview lessons with full video access
    * 
    * @async
    * @param {Object} req - Express request object
    * @param {string} req.params.id - Lesson ID
-   * @param {Object} req.user - Authenticated user (optional)
    * @param {Object} res - Express response object
    * @returns {Object} JSON response with lesson data
    */
   async getLessonForStudent(req, res) {
+    // Find published lesson
     const lesson = await Lesson.findOne({
       _id: req.params.id,
       isPublished: true
     }).populate('course', 'title isPublished');
     
+    // Check if lesson exists
     if (!lesson) {
-      return ResponseFormatter.notFound(res, lessonErrors.LESSON_NOT_FOUND);
+      return ResponseFormatter.notFound(res, {
+        message: 'Lesson not found or not published',
+        code: 'LESSON_NOT_FOUND'
+      });
     }
     
+    // Check if course is published
     if (!lesson.course.isPublished) {
-      return ResponseFormatter.notFound(res, courseErrors.COURSE_INACTIVE);
+      return ResponseFormatter.notFound(res, {
+        message: 'Course is not available',
+        code: 'COURSE_NOT_AVAILABLE'
+      });
     }
     
-    // Check access permissions
-    const hasAccess = lesson.isPreview; // For now, only preview lessons
-    // TODO: Add enrollment check when enrollment system is implemented
-    
-    if (!hasAccess) {
-      return ResponseFormatter.forbidden(res, lessonErrors.LESSON_ACCESS_DENIED);
+    // Check if lesson is available for preview
+    if (!lesson.isPreview) {
+      return ResponseFormatter.forbidden(res, {
+        message: 'This lesson is not available for preview. Please enroll in the course to access all lessons.',
+        code: 'PREVIEW_NOT_AVAILABLE',
+        data: {
+          courseId: lesson.course._id,
+          courseTitle: lesson.course.title,
+          suggestion: 'Enroll in the course to watch this lesson'
+        }
+      });
     }
     
-    // Prepare video data based on access
+    // Prepare video data (Full access for preview lessons)
     const videoData = {
+      videoUrl: lesson.video.originalUrl || lesson.video.qualities[lesson.video.defaultQuality],
       defaultQuality: lesson.video.defaultQuality,
-      availableQualities: Object.keys(lesson.video.qualities)
-        .filter(quality => lesson.video.qualities[quality])
+      availableQualities: Object.keys(lesson.video.qualities).filter(
+        quality => lesson.video.qualities[quality]
+      )
     };
     
-    if (hasAccess) {
-      videoData.videoUrl = lesson.video.qualities[lesson.video.defaultQuality] || 
-                          lesson.video.originalUrl;
-      videoData.qualities = lesson.video.qualities;
-    }
-    
+    // Prepare response data
     const responseData = {
       id: lesson._id,
       title: lesson.title,
       description: lesson.description,
       duration: lesson.duration,
-      formattedDuration: lesson.formattedDuration,
       order: lesson.order,
-      isPreview: lesson.isPreview,
-      hasAccess: hasAccess,
+      isPreview: true,
       video: videoData,
       course: {
         id: lesson.course._id,
@@ -501,10 +509,11 @@ class LessonController {
       }
     };
     
-    logger.info(`Lesson accessed by student: ${lesson._id}, access: ${hasAccess}`);
+    logger.info(`Preview lesson accessed: ${lesson._id} for course ${lesson.course._id}`);
     
     return ResponseFormatter.success(res, {
-      ...lessonSuccess.LESSON_FETCHED,
+      message: 'Preview lesson retrieved successfully',
+      code: 'PREVIEW_LESSON_FETCHED',
       data: { lesson: responseData }
     });
   }

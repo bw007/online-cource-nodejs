@@ -2,6 +2,7 @@ const { uploadErrors } = require('@/constants/errors');
 const { ResponseFormatter, logger } = require('@/utils');
 const { User, Lesson } = require('@/models');
 const { cleanupFile } = require('@/middlewares/upload');
+const { uploadSuccess } = require('@/constants/success');
 
 /**
  * Upload Controller

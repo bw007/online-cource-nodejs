@@ -49,37 +49,6 @@ class StudentController {
     });
   }
 
-  async unenrollFromCourse(req, res) {
-    const { courseId } = req.params;
-    const studentId = req.user.id;
-    
-    const enrollment = await Enrollment.findOne({
-      student: studentId,
-      course: courseId
-    });
-    
-    if (!enrollment) {
-      return ResponseFormatter.notFound(res, courseErrors.COURSE_NOT_ENROLLED);
-    }
-    
-    await Promise.all([
-      Enrollment.findByIdAndDelete(enrollment._id),
-      Progress.deleteMany({ student: studentId, course: courseId })
-    ]);
-    
-    await Course.findByIdAndUpdate(courseId, {
-      $inc: { studentsCount: -1 }
-    });
-    
-    await User.findByIdAndUpdate(studentId, {
-      $pull: { enrolledCourses: courseId }
-    });
-    
-    logger.info(`Student ${studentId} unenrolled from course ${courseId}`);
-    
-    return ResponseFormatter.success(res, courseSuccess.COURSE_UNENROLLED);
-  }
-
   async getMyCourses(req, res) {
     const studentId = req.user.id;
     const page = parseInt(req.query.page) || 1;
@@ -134,109 +103,64 @@ class StudentController {
     const { courseId } = req.params;
     const studentId = req.user.id;
     
+    // Check enrollment
     const enrollment = await Enrollment.findOne({
       student: studentId,
       course: courseId
     });
     
     if (!enrollment) {
-      return ResponseFormatter.forbidden(res, courseErrors.COURSE_NOT_ENROLLED);
+      return ResponseFormatter.notFound(res, courseErrors.COURSE_NOT_ENROLLED);
     }
     
-    const course = await Course.findById(courseId)
-      .populate('instructor', 'name email');
-      
+    // Get course details
+    const course = await Course.findOne({
+      _id: courseId,
+      isPublished: true
+    }).populate('instructor', 'name email');
+    
     if (!course) {
       return ResponseFormatter.notFound(res, courseErrors.COURSE_NOT_FOUND);
     }
     
-    // Get completed lessons (simple Set for fast lookup)
-    const completedLessons = await Progress.find({
-      student: studentId,
-      course: courseId,
-      isCompleted: true
-    }).select('lesson');
+    // Get published sections with lessons
+    const sections = await Section.find({
+      course: course._id,
+      isPublished: true
+    })
+    .sort({ order: 1 })
+    .lean();
     
-    const completedLessonsSet = new Set(
-      completedLessons.map(p => p.lesson.toString())
-    );
+    // Add lessons to each section
+    for (let section of sections) {
+      section.lessons = await Lesson.find({
+        section: section._id,
+        isPublished: true
+      })
+      .sort({ order: 1 })
+      .select('title description duration isPreview order video.originalUrl video.defaultQuality')
+      .lean();
+    }
     
-    // Get published sections
-    const sections = await Section.find({ 
-      course: courseId,
-      isPublished: true 
-    }).sort({ order: 1 });
-    
-    // Get loose lessons
+    // Get loose lessons (not in any section)
     const looseLessons = await Lesson.find({
-      course: courseId,
+      course: course._id,
       section: null,
       isPublished: true
-    }).sort({ order: 1 });
+    })
+    .sort({ order: 1 })
+    .select('title description duration isPreview order video.originalUrl video.defaultQuality')
+    .lean();
     
-    // Get lessons grouped by section
-    const sectionsWithLessons = await Promise.all(
-      sections.map(async (section) => {
-        const lessons = await Lesson.find({
-          section: section._id,
-          isPublished: true
-        }).sort({ order: 1 });
-        
-        // SIMPLIFIED: faqat isCompleted
-        const lessonsWithStatus = lessons.map(lesson => ({
-          id: lesson._id,
-          title: lesson.title,
-          duration: lesson.duration,
-          order: lesson.order,
-          isPreview: lesson.isPreview,
-          isCompleted: completedLessonsSet.has(lesson._id.toString())
-        }));
-        
-        return {
-          section: {
-            id: section._id,
-            title: section.title,
-            description: section.description,
-            order: section.order
-          },
-          lessons: lessonsWithStatus
-        };
-      })
-    );
-    
-    const looseLessonsWithStatus = looseLessons.map(lesson => ({
-      id: lesson._id,
-      title: lesson.title,
-      duration: lesson.duration,
-      order: lesson.order,
-      isPreview: lesson.isPreview,
-      isCompleted: completedLessonsSet.has(lesson._id.toString())
-    }));
-    
-    // Calculate total lessons
-    const totalLessons = await Lesson.countDocuments({
-      course: courseId,
-      isPublished: true
-    });
+    logger.info(`Enrolled course detail retrieved: ${courseId} by student ${studentId}`);
     
     return ResponseFormatter.success(res, {
-      ...courseSuccess.COURSE_FETCHED,
-      data: {
+      message: 'Enrolled course details retrieved successfully',
+      data: { 
         course,
-        progress: {
-          completedLessons: enrollment.completedLessonsCount,
-          totalLessons,
-          progressPercentage: enrollment.progressPercentage,
-          isCompleted: enrollment.isCompleted
-        },
-        enrollment: {
-          enrolledAt: enrollment.enrolledAt,
-          lastActivityAt: enrollment.lastActivityAt
-        },
-        content: {
-          sections: sectionsWithLessons,
-          looseLessons: looseLessonsWithStatus
-        }
+        sections,
+        looseLessons,
+        enrollment
       }
     });
   }
