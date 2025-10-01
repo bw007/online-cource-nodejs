@@ -1,3 +1,4 @@
+// src/models/lesson/Lesson.js
 const mongoose = require('mongoose');
 const fieldNames = require('@/constants/fieldNames');
 const { commonValidation } = require('@/constants/validations');
@@ -20,6 +21,12 @@ const LessonSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Course',
     required: [true, commonValidation.REQUIRED(fieldNames.lesson.course)]
+  },
+  
+  section: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Section',
+    default: null
   },
   
   video: {
@@ -50,7 +57,7 @@ const LessonSchema = new mongoose.Schema({
   },
   
   duration: {
-    type: Number, // seconds
+    type: Number,
     required: [true, commonValidation.REQUIRED(fieldNames.lesson.duration)],
     min: [1, 'Duration must be at least 1 second']
   },
@@ -75,9 +82,10 @@ const LessonSchema = new mongoose.Schema({
   timestamps: true
 });
 
-// Indexes for performance
-LessonSchema.index({ course: 1, order: 1 }, { unique: true });
+// Indexes
+LessonSchema.index({ course: 1, section: 1, order: 1 }, { unique: true });
 LessonSchema.index({ course: 1, isPublished: 1 });
+LessonSchema.index({ section: 1, isPublished: 1 });
 LessonSchema.index({ isPreview: 1 });
 
 LessonSchema.pre(/^find/, function(next) {
@@ -85,12 +93,14 @@ LessonSchema.pre(/^find/, function(next) {
     this.populate({
       path: 'course',
       select: 'title instructor isPublished'
+    }).populate({
+      path: 'section',
+      select: 'title order'
     });
   }
   next();
 });
 
-// Helper method - duration
 LessonSchema.virtual('formattedDuration').get(function() {
   const minutes = Math.floor(this.duration / 60);
   const seconds = this.duration % 60;
