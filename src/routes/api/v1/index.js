@@ -4,6 +4,7 @@ const router = Router();
 
 const authRoutes = require('./auth.routes');
 const adminRoutes = require('./admin.routes');
+const instructorRoutes = require('./instructor.routes');
 const studentRoutes = require('./student.routes');
 const publicRoutes = require('./public.routes');
 const uploadRoutes = require('./upload.routes');
@@ -11,6 +12,7 @@ const streamRoutes = require('./stream.routes');
 
 router.use('/auth', authRoutes);
 router.use('/admin', adminRoutes);
+router.use('/admin/instructors', instructorRoutes);
 router.use('/student', studentRoutes);
 router.use('/public', publicRoutes);
 router.use('/upload', uploadRoutes);
