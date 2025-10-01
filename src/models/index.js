@@ -4,6 +4,7 @@ const Lesson = require('./lesson/Lesson');
 const Enrollment = require('./enrollment/Enrollment');
 const Progress = require('./progress/Progress');
 const Section = require('./section/Section');
+const Instructor = require('./instructor/Instructor');
 
 module.exports = {
   User,
@@ -11,5 +12,6 @@ module.exports = {
   Lesson,
   Section,
   Enrollment,
+  Instructor,
   Progress
 };
