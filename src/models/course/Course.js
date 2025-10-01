@@ -21,7 +21,7 @@ const CourseSchema = new mongoose.Schema({
   
   instructor: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: 'User',
+    ref: 'Instructor',
     required: true
   },
   
@@ -78,7 +78,7 @@ CourseSchema.virtual('lessonsCount', {
 CourseSchema.pre(/^find/, function(next) {
   this.populate({
     path: 'instructor',
-    select: 'name email'
+    select: 'name email avatar title bio socials'
   });
   next();
 });
