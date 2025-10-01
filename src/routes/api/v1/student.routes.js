@@ -1,10 +1,10 @@
+// src/routes/api/v1/student.routes.js
 const express = require('express');
 const { authenticate, requireStudent, asyncHandler } = require('@/middlewares');
 const { studentController } = require('@/controllers');
 
 const router = express.Router();
 
-// Apply student authentication to all routes
 router.use(authenticate, requireStudent);
 
 // COURSE ENROLLMENT
@@ -15,8 +15,10 @@ router.delete('/courses/:courseId/enroll', asyncHandler(studentController.unenro
 router.get('/my-courses', asyncHandler(studentController.getMyCourses));
 router.get('/my-courses/:courseId', asyncHandler(studentController.getEnrolledCourseDetail));
 
-// LESSON ACCESS & PROGRESS
+// LESSON ACCESS
 router.get('/lessons/:lessonId', asyncHandler(studentController.getEnrolledLesson));
-router.post('/lessons/:lessonId/progress', asyncHandler(studentController.updateLessonProgress));
+
+// COMPLETE LESSON
+router.post('/lessons/:lessonId/complete', asyncHandler(studentController.completeLesson));
 
 module.exports = router;

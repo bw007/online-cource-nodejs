@@ -6,54 +6,30 @@ const ProgressSchema = new mongoose.Schema({
     ref: 'User',
     required: true
   },
-  
-  lesson: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'Lesson',
-    required: true
-  },
-  
   course: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Course',
     required: true
   },
-  
-  // Video watch progress
-  watchTime: {
-    type: Number, // seconds
-    default: 0
+  lesson: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Lesson',
+    required: true
   },
-  
-  // Lesson completion status
   isCompleted: {
     type: Boolean,
     default: false
   },
-  
   completedAt: {
     type: Date,
     default: null
-  },
-  
-  // Watch percentage (0-100)
-  watchPercentage: {
-    type: Number,
-    default: 0,
-    min: 0,
-    max: 100
   }
-  
 }, {
-  timestamps: true,
-  versionKey: false
+  timestamps: true
 });
 
-// Compound index for unique progress per user-lesson
-ProgressSchema.index({ student: 1, lesson: 1 }, { unique: true });
-
-// Indexes for performance
+// Index
+ProgressSchema.index({ student: 1, course: 1, lesson: 1 }, { unique: true });
 ProgressSchema.index({ student: 1, course: 1 });
-ProgressSchema.index({ lesson: 1, isCompleted: 1 });
 
 module.exports = mongoose.model('Progress', ProgressSchema);

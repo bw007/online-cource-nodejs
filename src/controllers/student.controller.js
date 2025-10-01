@@ -1,19 +1,11 @@
 // src/controllers/student.controller.js
-const { courseErrors, commonErrors, lessonErrors } = require('@/constants/errors');
-const { courseSuccess, commonSuccess } = require('@/constants/success');
-const { Course, Lesson, Enrollment, Progress, User } = require('@/models');
+const { courseErrors, lessonErrors } = require('@/constants/errors');
+const { courseSuccess } = require('@/constants/success');
+const { Course, Lesson, Enrollment, Progress, User, Section } = require('@/models');
 const { ResponseFormatter, logger } = require('@/utils');
 
-/**
- * Student Controller
- * Handles student-specific operations: enrollment, progress tracking, my courses
- */
 class StudentController {
 
-  /**
-   * Enroll student in course
-   * Creates enrollment record and updates course stats
-   */
   async enrollInCourse(req, res) {
     const { courseId } = req.params;
     const studentId = req.user.id;
@@ -57,10 +49,6 @@ class StudentController {
     });
   }
 
-  /**
-   * Unenroll student from course
-   * Removes enrollment and updates stats
-   */
   async unenrollFromCourse(req, res) {
     const { courseId } = req.params;
     const studentId = req.user.id;
@@ -92,10 +80,6 @@ class StudentController {
     return ResponseFormatter.success(res, courseSuccess.COURSE_UNENROLLED);
   }
 
-  /**
-   * Get student's enrolled courses
-   * Returns list of courses with progress
-   */
   async getMyCourses(req, res) {
     const studentId = req.user.id;
     const page = parseInt(req.query.page) || 1;
@@ -121,6 +105,7 @@ class StudentController {
         id: enrollment._id,
         enrolledAt: enrollment.enrolledAt,
         progressPercentage: enrollment.progressPercentage,
+        completedLessonsCount: enrollment.completedLessonsCount,
         isCompleted: enrollment.isCompleted,
         lastActivityAt: enrollment.lastActivityAt
       },
@@ -142,14 +127,13 @@ class StudentController {
   }
 
   /**
-   * Get enrolled course details with lessons
-   * Shows course content for enrolled student
+   * Get enrolled course detail with completion status
+   * SIMPLIFIED: Only shows isCompleted for each lesson
    */
   async getEnrolledCourseDetail(req, res) {
     const { courseId } = req.params;
     const studentId = req.user.id;
     
-    // Check enrollment FIRST
     const enrollment = await Enrollment.findOne({
       student: studentId,
       course: courseId
@@ -159,7 +143,6 @@ class StudentController {
       return ResponseFormatter.forbidden(res, courseErrors.COURSE_NOT_ENROLLED);
     }
     
-    // Get course with lessons
     const course = await Course.findById(courseId)
       .populate('instructor', 'name email');
       
@@ -167,149 +150,156 @@ class StudentController {
       return ResponseFormatter.notFound(res, courseErrors.COURSE_NOT_FOUND);
     }
     
-    const lessons = await Lesson.find({ 
+    // Get completed lessons (simple Set for fast lookup)
+    const completedLessons = await Progress.find({
+      student: studentId,
+      course: courseId,
+      isCompleted: true
+    }).select('lesson');
+    
+    const completedLessonsSet = new Set(
+      completedLessons.map(p => p.lesson.toString())
+    );
+    
+    // Get published sections
+    const sections = await Section.find({ 
       course: courseId,
       isPublished: true 
     }).sort({ order: 1 });
     
-    // Get student's progress for each lesson
-    const progressMap = {};
-    const progresses = await Progress.find({
-      student: studentId,
-      course: courseId
-    });
+    // Get loose lessons
+    const looseLessons = await Lesson.find({
+      course: courseId,
+      section: null,
+      isPublished: true
+    }).sort({ order: 1 });
     
-    progresses.forEach(progress => {
-      progressMap[progress.lesson.toString()] = progress;
-    });
+    // Get lessons grouped by section
+    const sectionsWithLessons = await Promise.all(
+      sections.map(async (section) => {
+        const lessons = await Lesson.find({
+          section: section._id,
+          isPublished: true
+        }).sort({ order: 1 });
+        
+        // SIMPLIFIED: faqat isCompleted
+        const lessonsWithStatus = lessons.map(lesson => ({
+          id: lesson._id,
+          title: lesson.title,
+          duration: lesson.duration,
+          order: lesson.order,
+          isPreview: lesson.isPreview,
+          isCompleted: completedLessonsSet.has(lesson._id.toString())
+        }));
+        
+        return {
+          section: {
+            id: section._id,
+            title: section.title,
+            description: section.description,
+            order: section.order
+          },
+          lessons: lessonsWithStatus
+        };
+      })
+    );
     
-    // Add progress info to lessons
-    const lessonsWithProgress = lessons.map(lesson => ({
-      ...lesson.toObject(),
-      progress: progressMap[lesson._id.toString()] || {
-        watchTime: 0,
-        watchPercentage: 0,
-        isCompleted: false
-      }
+    const looseLessonsWithStatus = looseLessons.map(lesson => ({
+      id: lesson._id,
+      title: lesson.title,
+      duration: lesson.duration,
+      order: lesson.order,
+      isPreview: lesson.isPreview,
+      isCompleted: completedLessonsSet.has(lesson._id.toString())
     }));
+    
+    // Calculate total lessons
+    const totalLessons = await Lesson.countDocuments({
+      course: courseId,
+      isPublished: true
+    });
     
     return ResponseFormatter.success(res, {
       ...courseSuccess.COURSE_FETCHED,
       data: {
         course,
-        enrollment: {
+        progress: {
+          completedLessons: enrollment.completedLessonsCount,
+          totalLessons,
           progressPercentage: enrollment.progressPercentage,
-          lastWatchedLesson: enrollment.lastWatchedLesson,
-          isCompleted: enrollment.isCompleted,
-          enrolledAt: enrollment.enrolledAt
+          isCompleted: enrollment.isCompleted
         },
-        lessons: lessonsWithProgress
+        enrollment: {
+          enrolledAt: enrollment.enrolledAt,
+          lastActivityAt: enrollment.lastActivityAt
+        },
+        content: {
+          sections: sectionsWithLessons,
+          looseLessons: looseLessonsWithStatus
+        }
       }
     });
   }
 
   /**
-   * Get lesson for enrolled student
-   * Returns lesson with video access ONLY for enrolled students or preview lessons
-   * 
-   * SECURITY: This is the critical access control point
+   * Get lesson with completion status
+   * SIMPLIFIED: Only returns isCompleted
    */
   async getEnrolledLesson(req, res) {
     const { lessonId } = req.params;
     const studentId = req.user.id;
     
-    // Get lesson with course info
     const lesson = await Lesson.findOne({
       _id: lessonId,
       isPublished: true
-    }).populate({
-      path: 'course',
-      select: 'title isPublished', // ← CRITICAL: isPublished MUST be selected
-      populate: {
-        path: 'instructor',
-        select: 'name email'
-      }
-    });   
+    }).populate('course', 'title isPublished');
     
     if (!lesson) {
       return ResponseFormatter.notFound(res, lessonErrors.LESSON_NOT_FOUND);
     }
     
     if (!lesson.course.isPublished) {
-      return ResponseFormatter.notFound(res, courseErrors.COURSE_INACTIVE);
+      return ResponseFormatter.notFound(res, courseErrors.COURSE_NOT_FOUND);
     }
     
-    // CRITICAL: Check access permissions
-    let hasAccess = false;
-    let accessReason = null;
+    const courseId = lesson.course._id;
     
-    // Option 1: Preview lesson (free access)
-    if (lesson.isPreview) {
-      hasAccess = true;
-      accessReason = 'preview';
-    } 
-    // Option 2: Enrolled student (paid access)
-    else {
-      const enrollment = await Enrollment.findOne({
-        student: studentId,
-        course: lesson.course._id
-      });
-      
-      if (enrollment) {
-        hasAccess = true;
-        accessReason = 'enrolled';
-      }
-    }
+    // Check enrollment or preview
+    const enrollment = await Enrollment.findOne({
+      student: studentId,
+      course: courseId
+    });
     
-    // DENY ACCESS if not enrolled and not preview
-    if (!hasAccess) {
-      logger.warn(`Access denied: Student ${studentId} attempted to access lesson ${lessonId} without enrollment`);
+    if (!enrollment && !lesson.isPreview) {
       return ResponseFormatter.forbidden(res, {
-        message: 'You must enroll in this course to access this lesson',
-        code: 'LESSON_ACCESS_DENIED'
+        message: 'Access denied. Enroll in course to watch this lesson.',
+        code: 'ENROLLMENT_REQUIRED'
       });
     }
     
-    // Get student's progress for this lesson
+    // Get completion status (simple)
     const progress = await Progress.findOne({
       student: studentId,
+      course: courseId,
       lesson: lessonId
     });
     
-    // Prepare response with video URLs (only for enrolled/preview)
     const responseData = {
       id: lesson._id,
       title: lesson.title,
       description: lesson.description,
       duration: lesson.duration,
-      formattedDuration: lesson.formattedDuration,
       order: lesson.order,
       isPreview: lesson.isPreview,
-      course: lesson.course,
       video: {
         defaultQuality: lesson.video.defaultQuality,
-        availableQualities: Object.keys(lesson.video.qualities).filter(
-          quality => lesson.video.qualities[quality]
-        ),
-        videoUrl: lesson.video.qualities[lesson.video.defaultQuality] || 
-                  lesson.video.originalUrl
+        videoUrl: lesson.video.originalUrl
       },
-      progress: progress ? {
-        watchTime: progress.watchTime,
-        watchPercentage: progress.watchPercentage,
-        isCompleted: progress.isCompleted
-      } : {
-        watchTime: 0,
-        watchPercentage: 0,
-        isCompleted: false
-      },
-      accessInfo: {
-        hasAccess: true,
-        reason: accessReason
-      }
+      isCompleted: progress ? progress.isCompleted : false,
+      completedAt: progress ? progress.completedAt : null
     };
     
-    logger.info(`Lesson accessed: Student ${studentId}, Lesson ${lessonId}, Access: ${accessReason}`);
+    logger.info(`Lesson accessed: Student ${studentId}, Lesson ${lessonId}`);
     
     return ResponseFormatter.success(res, {
       message: 'Lesson retrieved successfully',
@@ -318,97 +308,70 @@ class StudentController {
   }
 
   /**
-   * Update lesson progress
-   * Records video watch progress and completion
+   * Complete lesson (SIMPLIFIED)
+   * Mark lesson as completed and update course progress
    */
-  async updateLessonProgress(req, res) {
+  async completeLesson(req, res) {
     const { lessonId } = req.params;
-    const { watchTime, duration } = req.body;
     const studentId = req.user.id;
     
-    if (!watchTime || !duration) {
-      return ResponseFormatter.badRequest(res, {
-        message: 'Watch time and duration are required',
-        code: 'MISSING_PROGRESS_DATA'
-      });
-    }
+    const lesson = await Lesson.findOne({
+      _id: lessonId,
+      isPublished: true
+    }).populate('course');
     
-    // Get lesson and verify it exists
-    const lesson = await Lesson.findById(lessonId);
     if (!lesson) {
       return ResponseFormatter.notFound(res, lessonErrors.LESSON_NOT_FOUND);
     }
     
-    // 🔒 CRITICAL: Check if student is enrolled in the course
+    const courseId = lesson.course._id;
+    
+    // Check enrollment
     const enrollment = await Enrollment.findOne({
       student: studentId,
-      course: lesson.course
+      course: courseId
     });
     
-    if (!enrollment && !lesson.isPreview) {
-      logger.warn(`Progress update denied: Student ${studentId} not enrolled in course for lesson ${lessonId}`);
+    if (!enrollment) {
       return ResponseFormatter.forbidden(res, {
-        message: 'You must enroll in this course to track progress',
+        message: 'Not enrolled in this course',
         code: 'COURSE_NOT_ENROLLED'
       });
     }
     
-    // Calculate watch percentage
-    const watchPercentage = Math.min((watchTime / duration) * 100, 100);
-    const isCompleted = watchPercentage >= 90; // 90% completion threshold
-    
-    // Update or create progress record
-    const progressData = {
+    // Check if already completed
+    let progress = await Progress.findOne({
       student: studentId,
-      lesson: lessonId,
-      course: lesson.course,
-      watchTime,
-      watchPercentage,
-      isCompleted,
-      completedAt: isCompleted ? new Date() : null
-    };
+      course: courseId,
+      lesson: lessonId
+    });
     
-    const progress = await Progress.findOneAndUpdate(
-      { student: studentId, lesson: lessonId },
-      progressData,
-      { upsert: true, new: true }
-    );
-    
-    // Update enrollment progress if enrolled (not just preview)
-    if (enrollment) {
-      if (isCompleted) {
-        await Enrollment.findByIdAndUpdate(enrollment._id, {
-          $addToSet: { completedLessons: lessonId },
-          lastWatchedLesson: lessonId,
-          lastActivityAt: new Date()
-        });
-        
-        // Calculate overall course progress
-        await this.updateCourseProgress(studentId, lesson.course);
-      } else {
-        await Enrollment.findByIdAndUpdate(enrollment._id, {
-          lastWatchedLesson: lessonId,
-          lastActivityAt: new Date()
-        });
-      }
+    if (progress && progress.isCompleted) {
+      return ResponseFormatter.badRequest(res, {
+        message: 'Lesson already completed',
+        code: 'LESSON_ALREADY_COMPLETED'
+      });
     }
     
-    logger.info(`Progress updated: Student ${studentId}, Lesson ${lessonId}, ${watchPercentage.toFixed(1)}%`);
+    // Mark as completed
+    if (!progress) {
+      progress = await Progress.create({
+        student: studentId,
+        course: courseId,
+        lesson: lessonId,
+        isCompleted: true,
+        completedAt: new Date()
+      });
+    } else {
+      progress.isCompleted = true;
+      progress.completedAt = new Date();
+      await progress.save();
+    }
     
-    return ResponseFormatter.success(res, {
-      message: 'Progress updated successfully',
-      data: { progress }
-    });
-  }
-
-  /**
-   * Update overall course progress percentage
-   * Helper method to calculate and update course completion
-   */
-  async updateCourseProgress(studentId, courseId) {
-    const totalLessons = await Lesson.countDocuments({ 
+    // Calculate course progress
+    const totalLessons = await Lesson.countDocuments({
       course: courseId,
-      isPublished: true 
+      isPublished: true
     });
     
     const completedLessons = await Progress.countDocuments({
@@ -417,21 +380,34 @@ class StudentController {
       isCompleted: true
     });
     
-    const progressPercentage = totalLessons > 0 ? 
-      Math.round((completedLessons / totalLessons) * 100) : 0;
+    const progressPercentage = Math.round((completedLessons / totalLessons) * 100);
+    const isCompleted = completedLessons === totalLessons;
     
-    const isCompleted = progressPercentage === 100;
+    // Update enrollment
+    enrollment.progressPercentage = progressPercentage;
+    enrollment.completedLessonsCount = completedLessons;
+    enrollment.isCompleted = isCompleted;
+    enrollment.lastActivityAt = new Date();
+    await enrollment.save();
     
-    await Enrollment.findOneAndUpdate(
-      { student: studentId, course: courseId },
-      {
-        progressPercentage,
-        isCompleted,
-        completedAt: isCompleted ? new Date() : null
+    logger.info(`Lesson completed: ${lessonId} by student ${studentId}, course progress: ${progressPercentage}%`);
+    
+    return ResponseFormatter.success(res, {
+      message: 'Lesson completed successfully',
+      data: {
+        lesson: {
+          id: lesson._id,
+          title: lesson.title,
+          isCompleted: true
+        },
+        courseProgress: {
+          completedLessons,
+          totalLessons,
+          progressPercentage,
+          isCompleted
+        }
       }
-    );
-    
-    logger.info(`Course progress updated: Student ${studentId}, Course ${courseId}, ${progressPercentage}%`);
+    });
   }
 }
 

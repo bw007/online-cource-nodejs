@@ -1,7 +1,7 @@
 const { courseErrors, commonErrors } = require('@/constants/errors');
 const { ResponseFormatter, logger } = require('@/utils');
 const { ROLES } = require('@/constants/enums');
-const { Course, Lesson } = require('@/models');
+const { Course, Lesson, Section } = require('@/models');
 const { courseSuccess } = require('@/constants/success');
 
 /**
@@ -399,22 +399,65 @@ class CourseController {
       return ResponseFormatter.notFound(res, courseErrors.COURSE_NOT_FOUND);
     }
     
-    // Get published lessons (preview + enrolled access logic will be handled later)
-    const lessons = await Lesson.find({ 
+    // Get published sections
+    const sections = await Section.find({ 
       course: course._id,
+      isPublished: true 
+    }).sort({ order: 1 });
+    
+    // Get loose lessons (without section)
+    const looseLessons = await Lesson.find({
+      course: course._id,
+      section: null,
       isPublished: true
     })
     .sort({ order: 1 })
     .select('title duration order isPreview');
     
+    // Get lessons grouped by section
+    const sectionsWithLessons = await Promise.all(
+      sections.map(async (section) => {
+        const lessons = await Lesson.find({
+          section: section._id,
+          isPublished: true
+        })
+        .sort({ order: 1 })
+        .select('title duration order isPreview');
+        
+        return {
+          section: {
+            id: section._id,
+            title: section.title,
+            description: section.description,
+            order: section.order
+          },
+          lessons: lessons.map(lesson => ({
+            id: lesson._id,
+            title: lesson.title,
+            duration: lesson.duration,
+            order: lesson.order,
+            isPreview: lesson.isPreview,
+            hasAccess: lesson.isPreview
+          }))
+        };
+      })
+    );
+    
     return ResponseFormatter.success(res, {
       ...courseSuccess.COURSE_FETCHED,
       data: {
         course,
-        lessons: lessons.map(lesson => ({
-          ...lesson.toObject(),
-          hasAccess: lesson.isPreview // For now, only preview lessons are accessible
-        }))
+        content: {
+          sections: sectionsWithLessons,
+          looseLessons: looseLessons.map(lesson => ({
+            id: lesson._id,
+            title: lesson.title,
+            duration: lesson.duration,
+            order: lesson.order,
+            isPreview: lesson.isPreview,
+            hasAccess: lesson.isPreview
+          }))
+        }
       }
     });
   }
