@@ -87,6 +87,38 @@ const UserSchema = new mongoose.Schema({
     default: null
   },
 
+  // OTP Verification Fields
+  emailVerificationOTP: {
+    type: String,
+    default: null,
+    select: false
+  },
+
+  emailVerificationOTPExpires: {
+    type: Date,
+    default: null
+  },
+
+  emailVerificationOTPAttempts: {
+    type: Number,
+    default: 0
+  },
+
+  lastOTPSentAt: {
+    type: Date,
+    default: null
+  },
+
+  otpResendCount: {
+    type: Number,
+    default: 0
+  },
+
+  otpResendCountResetAt: {
+    type: Date,
+    default: null
+  },
+
   // Password Reset (Only for LOCAL provider)
   passwordResetToken: {
     type: String,
