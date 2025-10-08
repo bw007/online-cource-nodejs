@@ -4,10 +4,11 @@ const { v4: uuidv4 } = require('uuid');
 const { User } = require('@/models');
 const { PROVIDERS } = require('@/constants/enums');
 const { jwtConfig, getCookieOptions, getClearCookieOptions } = require('@/config');
-const { logger, ResponseFormatter } = require('@utils');
+const { logger, ResponseFormatter, generateOTP, getOTPExpiry } = require('@utils');
 
 const { commonErrors, authErrors, jwtErrors } = require('@/constants/errors');
 const { authSuccess, jwtSuccess } = require('@/constants/success');
+const emailService = require('@/services/email.service');
 
 /**
  * Authentication Controller
@@ -60,7 +61,22 @@ class AuthController {
     if (!user) {
       logger.warn(`Failed login attempt for email: ${email}`);
       return ResponseFormatter.unauthorized(res, authErrors.INVALID_CREDENTIALS);
-    }    
+    }
+
+    if (!user.isEmailVerified) {
+      return ResponseFormatter.accepted(res, {
+        message: 'Email verification required',
+        code: 'EMAIL_VERIFICATION_REQUIRED',
+        data: {
+          email: user.email,
+          userId: user._id
+        },
+        action: {
+          type: 'verify_email',
+          canResend: true
+        }
+      });
+    }
 
     // Check if account is active
     if (!user.isActive) {
@@ -180,34 +196,134 @@ class AuthController {
     if (existingUser) {
       return ResponseFormatter.conflict(res, authErrors.USER_EXISTS);
     }
-    
-    // Generate new token version using UUID
-    const tokenVersion = uuidv4();
 
-    // Create new user
+    // Generate OTP
+    const otp = generateOTP();
+    const otpExpiry = getOTPExpiry(20); // 10 minutes
+
+    // Create new user WITHOUT tokens (user not verified yet)
     const newUser = await User.create({
       name: name.trim(),
       email: email.toLowerCase().trim(),
       password,
-      tokenVersion,
-      provider: PROVIDERS.LOCAL
+      provider: PROVIDERS.LOCAL,
+      isEmailVerified: false,
+      emailVerificationOTP: otp,
+      emailVerificationOTPExpires: otpExpiry,
+      emailVerificationOTPAttempts: 0
     });
 
-    // Generate tokens
+    // Send OTP email
+    try {
+      await emailService.sendOTPEmail(email, name, otp);
+      logger.info(`OTP sent to new user: ${newUser._id}`);
+    } catch (error) {
+      logger.error(`Failed to send OTP email: ${error.message}`);
+      // Continue even if email fails - user can resend OTP
+    }
+
+    logger.info(`New user registered (awaiting verification): ${newUser._id}`);
+
+    // Return user data WITHOUT tokens (not verified yet)
+    return ResponseFormatter.created(res, {
+      message: 'Registration successful. Please verify your email with OTP code.',
+      code: 'REGISTRATION_SUCCESS_OTP_SENT',
+      data: { 
+        userId: newUser._id,
+        email: newUser.email,
+        name: newUser.name,
+        otpSent: true,
+        expiresIn: 20
+      }
+    });
+  }
+
+  /**
+   * Verify OTP and complete registration
+   */
+  async verifyOTP(req, res) {
+    const { email, otp } = req.body;
+
+    // Validate required fields
+    if (!email || !otp) {
+      return ResponseFormatter.badRequest(res, {
+        message: 'Email and OTP are required',
+        code: 'MISSING_OTP_FIELDS'
+      });
+    }
+
+    // Find user
+    const user = await User.findOne({
+      email: email.toLowerCase() 
+    }).select('+emailVerificationOTP');
+
+    if (!user) {
+      return ResponseFormatter.notFound(res, authErrors.USER_NOT_FOUND);
+    }
+
+    // Check if already verified
+    if (user.isEmailVerified) {
+      return ResponseFormatter.badRequest(res, {
+        message: 'Email already verified',
+        code: 'EMAIL_ALREADY_VERIFIED'
+      });
+    }
+
+    // Check OTP attempts (max 5 attempts)
+    if (user.emailVerificationOTPAttempts >= 5) {
+      return ResponseFormatter.forbidden(res, {
+        message: 'Too many failed attempts. Please request a new OTP.',
+        code: 'OTP_MAX_ATTEMPTS_EXCEEDED'
+      });
+    }
+
+    // Check if OTP expired
+    if (!user.emailVerificationOTPExpires || 
+        new Date() > user.emailVerificationOTPExpires) {
+      return ResponseFormatter.badRequest(res, {
+        message: 'OTP has expired. Please request a new one.',
+        code: 'OTP_EXPIRED'
+      });
+    }
+
+    // Verify OTP
+    if (user.emailVerificationOTP !== otp.trim()) {
+      // Increment failed attempts
+      await User.findByIdAndUpdate(user._id, {
+        $inc: { emailVerificationOTPAttempts: 1 }
+      });
+
+      return ResponseFormatter.unauthorized(res, {
+        message: 'Invalid OTP code',
+        code: 'INVALID_OTP',
+        data: {
+          attemptsLeft: 5 - (user.emailVerificationOTPAttempts + 1)
+        }
+      });
+    }
+
+    // OTP is valid - Generate tokens and verify user
+    const tokenVersion = uuidv4();
+
     const accessToken = jwtConfig.generateAccessToken({
-      id: newUser._id,
-      email: newUser.email,
-      role: newUser.role,
+      id: user._id,
+      email: user.email,
+      role: user.role,
       tokenVersion
     });
 
     const refreshToken = jwtConfig.generateRefreshToken({
-      id: newUser._id,
+      id: user._id,
       tokenVersion
     });
 
-    // Update user with tokens
-    await User.findByIdAndUpdate(newUser._id, {
+    // Update user - mark as verified and add tokens
+    await User.findByIdAndUpdate(user._id, {
+      isEmailVerified: true,
+      emailVerificationOTP: null,
+      emailVerificationOTPExpires: null,
+      emailVerificationOTPAttempts: 0,
+      tokenVersion,
       refreshToken,
       refreshTokenExpiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
       lastTokenRefresh: new Date(),
@@ -215,27 +331,261 @@ class AuthController {
       loginCount: 1
     });
 
-    logger.info(`New user registered: ${newUser._id}`);
+    logger.info(`User email verified successfully: ${user._id}`);
 
-    // Return user data without sensitive fields
+    // Return user data with tokens
     const userData = {
-      id: newUser._id,
-      name: newUser.name,
-      email: newUser.email,
-      role: newUser.role,
-      avatar: newUser.avatar,
-      isEmailVerified: newUser.isEmailVerified,
-      enrolledCourses: newUser.enrolledCourses
+      id: user._id,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      avatar: user.avatar,
+      isEmailVerified: true,
+      enrolledCourses: user.enrolledCourses
     };
 
-    return ResponseFormatter.created(res, {
-      ...authSuccess.REGISTRATION_SUCCESS,
+    // Set refresh token as httpOnly cookie
+    res.cookie('refreshToken', refreshToken, getCookieOptions());
+
+    return ResponseFormatter.success(res, {
+      message: 'Email verified successfully',
+      code: 'EMAIL_VERIFIED',
       data: { 
         user: userData, 
         accessToken, 
         refreshToken 
       }
     });
+  }
+
+  /**
+   * Resend OTP code
+   */
+  async resendOTP(req, res) {
+    const { email } = req.body;
+
+    if (!email) {
+      return ResponseFormatter.badRequest(res, {
+        message: 'Email is required',
+        code: 'EMAIL_REQUIRED'
+      });
+    }
+
+    // Find user
+    const user = await User.findOne({ 
+      email: email.toLowerCase() 
+    });
+
+    if (!user) {
+      return ResponseFormatter.notFound(res, authErrors.USER_NOT_FOUND);
+    }
+
+    // Check if already verified
+    if (user.isEmailVerified) {
+      return ResponseFormatter.badRequest(res, {
+        message: 'Email already verified',
+        code: 'EMAIL_ALREADY_VERIFIED'
+      });
+    }
+
+    const now = new Date();
+  
+    if (user.emailVerificationOTPExpires && 
+        user.emailVerificationOTPExpires > now) {
+      
+      const remainingSeconds = Math.ceil(
+        (user.emailVerificationOTPExpires - now) / 1000
+      );
+      const remainingMinutes = Math.floor(remainingSeconds / 60);
+      
+      return ResponseFormatter.accepted(res, {
+        message: `Your verification code is still active! Check your email inbox.`,
+        code: 'OTP_STILL_VALID',
+        data: {
+          status: 'active',
+          expiresIn: remainingSeconds,
+          expiresAt: user.emailVerificationOTPExpires,
+          remainingMinutes,
+          action: {
+            type: 'check_email',
+            description: 'Please check your email for the existing verification code',
+            canResend: false,
+            waitTime: remainingSeconds
+          }
+        }
+      });
+    }
+
+    const MIN_INTERVAL = 60 * 1000;
+    const lastSent = user.lastOTPSentAt?.getTime() || 0;
+    const timeSinceLastSent = now.getTime() - lastSent;
+
+    if (timeSinceLastSent < MIN_INTERVAL) {
+      const waitTime = Math.ceil((MIN_INTERVAL - timeSinceLastSent) / 1000);
+      
+      return ResponseFormatter.accepted(res, {
+        message: `Almost there! Please wait ${waitTime} seconds before requesting a new code.`,
+        code: 'OTP_RATE_LIMIT',
+        data: {
+          status: 'cooldown',
+          waitTime,
+          canResendAt: new Date(lastSent + MIN_INTERVAL),
+          action: {
+            type: 'wait',
+            description: 'This helps protect your account from spam',
+            canResend: true,
+            waitTime
+          }
+        }
+      });
+    }
+
+    const MAX_RESEND_PER_HOUR = 5;
+    const ONE_HOUR = 60 * 60 * 1000;
+
+    if (!user.otpResendCountResetAt || 
+        (now - user.otpResendCountResetAt) > ONE_HOUR) {
+      user.otpResendCount = 0;
+      user.otpResendCountResetAt = now;
+    }
+
+    if (user.otpResendCount >= MAX_RESEND_PER_HOUR) {
+      const resetAt = new Date(user.otpResendCountResetAt.getTime() + ONE_HOUR);
+      const resetIn = Math.ceil((resetAt - now) / 60000);
+      
+      return ResponseFormatter.accepted(res, {
+        message: `You've reached the maximum attempts for now. Please try again in ${resetIn} minutes.`,
+        code: 'OTP_RESEND_LIMIT_EXCEEDED',
+        data: {
+          status: 'limit_reached',
+          attemptsUsed: user.otpResendCount,
+          maxAttempts: MAX_RESEND_PER_HOUR,
+          resetAt,
+          resetInMinutes: resetIn,
+          action: {
+            type: 'wait',
+            description: 'This security measure helps protect your account',
+            canResend: false,
+            waitTime: resetIn * 60
+          }
+        }
+      });
+    }
+
+    // Generate new OTP
+    const otp = generateOTP();
+    const otpExpiry = getOTPExpiry(10);
+
+    // Update user with new OTP
+    await User.findByIdAndUpdate(user._id, {
+      emailVerificationOTP: otp,
+      emailVerificationOTPExpires: otpExpiry,
+      emailVerificationOTPAttempts: 0, // Reset attempts
+      lastOTPSentAt: now,
+      otpResendCount: user.otpResendCount + 1
+    });
+
+    // Send OTP email
+    try {
+      await emailService.sendOTPEmail(user.email, user.name, otp);
+      logger.info(`OTP resent to user: ${user._id}`);
+    } catch (error) {
+      logger.error(`Failed to resend OTP email: ${error.message}`);
+      return ResponseFormatter.error(res, {
+        message: 'Failed to send OTP email',
+        code: 'EMAIL_SEND_FAILED'
+      });
+    }
+
+    return ResponseFormatter.success(res, {
+      message: 'OTP code sent successfully',
+      code: 'OTP_RESENT',
+      data: {
+        email: user.email,
+        expiresIn: '20 minutes',
+        remainingAttempts: MAX_RESEND_PER_HOUR - (user.otpResendCount + 1)
+      }
+    });
+  }
+
+  /**
+   * Check if email exists in database
+   * Used for frontend async validation during registration
+   * 
+   * @async
+   * @param {Object} req - Express request object
+   * @param {Object} req.query - Query parameters
+   * @param {string} req.query.email - Email to check
+   * @param {Object} res - Express response object
+   * @returns {Object} JSON response with email availability status
+   * 
+   * @example
+   * GET /api/v1/auth/check-email?email=user@example.com
+   * 
+   * Success Response (Email available):
+   * {
+   *   "success": true,
+   *   "message": "Email is available",
+   *   "data": {
+   *     "isAvailable": true,
+   *     "email": "user@example.com"
+   *   }
+   * }
+   * 
+   * Success Response (Email taken):
+   * {
+   *   "success": true,
+   *   "message": "Email is already registered",
+   *   "data": {
+   *     "isAvailable": false,
+   *     "email": "user@example.com"
+   *   }
+   * }
+   */
+  async checkEmail(req, res) {
+    const { email } = req.query;
+
+    // Validate email parameter
+    if (!email) {
+      return ResponseFormatter.badRequest(res, {
+        message: 'Email parameter is required',
+        code: 'EMAIL_REQUIRED'
+      });
+    }
+
+    // Validate email format
+    const emailRegex = /^\w+([.-]?\w+)*@\w+([.-]?\w+)*(\.\w{2,3})+$/;
+    if (!emailRegex.test(email)) {
+      return ResponseFormatter.badRequest(res, {
+        message: 'Invalid email format',
+        code: 'INVALID_EMAIL_FORMAT'
+      });
+    }
+
+    try {
+      // Check if email exists in database
+      const existingUser = await User.findOne({ 
+        email: email.toLowerCase() 
+      }).select('_id email');
+
+      const isAvailable = !existingUser;
+
+      logger.info(`Email check for ${email}: ${isAvailable ? 'available' : 'taken'}`);
+
+      return ResponseFormatter.success(res, {
+        message: isAvailable ? 'Email is available' : 'Email is already registered',
+        data: {
+          isAvailable,
+          email: email.toLowerCase()
+        }
+      });
+    } catch (error) {
+      logger.error(`Error checking email availability: ${error.message}`);
+      return ResponseFormatter.error(res, {
+        message: 'Error checking email availability',
+        code: 'EMAIL_CHECK_ERROR'
+      });
+    }
   }
 
   /**

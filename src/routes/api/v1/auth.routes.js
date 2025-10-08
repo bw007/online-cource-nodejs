@@ -14,6 +14,12 @@ router.get('/verify', authenticate, asyncHandler(authController.verify));
 router.post('/logout', authenticate, asyncHandler(authController.logout));
 router.post('/refresh-token', asyncHandler(authController.refreshToken));
 
+router.post('/verify-otp', asyncHandler(authController.verifyOTP));
+router.post('/resend-otp', asyncHandler(authController.resendOTP));
+
+// EMAIL CHECK ROUTE - For frontend async validation
+router.get('/check-email', asyncHandler(authController.checkEmail));
+
 // GOOGLE OAUTH ROUTES
 router.get('/google', googleAuth);
 
