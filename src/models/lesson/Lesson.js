@@ -53,6 +53,11 @@ const LessonSchema = new mongoose.Schema({
       type: String,
       required: [true, commonValidation.VIDEO_URL_REQUIRED],
       trim: true
+    },
+    youtubeUrl: {
+      type: String,
+      default: null,
+      trim: true
     }
   },
   

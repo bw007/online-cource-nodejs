@@ -8,7 +8,7 @@
 const getCookieOptions = (rememberMe = false) => ({
   httpOnly: true,
   secure: process.env.NODE_ENV === 'production',
-  sameSite: 'strict',
+  sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax',
   path: '/',
   maxAge: (rememberMe ? 30 : 7) * 24 * 60 * 60 * 1000
 });

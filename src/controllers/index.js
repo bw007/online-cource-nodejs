@@ -1,5 +1,7 @@
 const authController = require("./auth.controller");
+const cartController = require("./cart.controller");
 const courseController = require("./course.controller");
+const favouriteController = require("./favourite.controller");
 const instructorController = require("./instructor.controller");
 const lessonController = require("./lesson.controller");
 const sectionController = require("./section.controller");
@@ -15,5 +17,7 @@ module.exports = {
   sectionController,
   studentController,
   uploadController,
-  streamController
+  streamController,
+  favouriteController,
+  cartController
 };

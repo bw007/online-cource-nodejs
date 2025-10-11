@@ -9,9 +9,13 @@ const studentRoutes = require('./student.routes');
 const publicRoutes = require('./public.routes');
 const uploadRoutes = require('./upload.routes');
 const streamRoutes = require('./stream.routes');
+const favouriteRoutes = require('./favourite.routes');
+const cartRoutes = require('./cart.routes');
 
 router.use('/auth', authRoutes);
 router.use('/admin', adminRoutes);
+router.use('/favourites', favouriteRoutes);
+router.use('/cart', cartRoutes);
 router.use('/admin/instructors', instructorRoutes);
 router.use('/student', studentRoutes);
 router.use('/public', publicRoutes);

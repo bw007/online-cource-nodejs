@@ -599,6 +599,7 @@ class AuthController {
   async refreshToken(req, res) {
     // Get refresh token from cookie or request body
     const refreshToken = req.cookies.refreshToken || req.body?.refreshToken;
+    console.log(req.cookies);
     
     if (!refreshToken) {
       return ResponseFormatter.unauthorized(res, jwtErrors.MISSING_TOKEN);
