@@ -4,17 +4,17 @@
  * @enum {string}
  */
 const COURSE_CATEGORIES = Object.freeze({
-  DEVELOPMENT: 'Development',
-  WEB_DEVELOPMENT: "Web Development",
-  DATA_SCIENCE: "Data Science",
-  MOBILE_DEVELOPMENT: "Mobile Development",
-  GAME_DEVELOPMENT: "Game Development",
-  CLOUD_COMPUTING: "Cloud Computing",
-  CYBER_SECURITY: "Cyber Security",
-  AI_MACHINE_LEARNING: "AI & Machine Learning",
-  DEVOPS: "DevOps",
-  UI_UX_DESIGN: "UI/UX Design",
-  SOFTWARE_TESTING: "Software Testing",
+  DEVELOPMENT: 'development',
+  WEB_DEVELOPMENT: 'web_development',
+  DATA_SCIENCE: 'data_science',
+  MOBILE_DEVELOPMENT: 'mobile_development',
+  GAME_DEVELOPMENT: 'game_development',
+  CLOUD_COMPUTING: 'cloud_computing',
+  CYBER_SECURITY: 'cyber_security',
+  AI: 'ai',
+  DEVOPS: 'devops',
+  UI_UX_DESIGN: 'ui_ux_design',
+  SOFTWARE_TESTING: 'software_testing',
 });
 
 /**

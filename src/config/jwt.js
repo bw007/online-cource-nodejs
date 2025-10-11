@@ -22,7 +22,7 @@ class JWTConfig {
     /**
      * @type {string}
      */
-    this.accessTokenExpiry = process.env.JWT_EXPIRES_IN || '24h';
+    this.accessTokenExpiry = process.env.JWT_EXPIRES_IN || '7d';
 
     /**
      * @type {string}

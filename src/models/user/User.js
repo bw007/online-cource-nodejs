@@ -174,6 +174,16 @@ const UserSchema = new mongoose.Schema({
   enrolledCourses: [{
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Course'
+  }],
+
+  cart: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Course'
+  }],
+
+  favouriteCourses: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Course'
   }]
 
 }, {
@@ -182,6 +192,8 @@ const UserSchema = new mongoose.Schema({
 });
 
 // Indexes for performance
+UserSchema.index({ favouriteCourses: 1 });
+UserSchema.index({ cart: 1 });
 UserSchema.index({ provider: 1, providerId: 1 });
 UserSchema.index({ emailVerificationToken: 1 });
 UserSchema.index({ passwordResetToken: 1 });
