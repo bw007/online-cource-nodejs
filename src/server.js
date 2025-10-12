@@ -2,8 +2,9 @@ require('module-alias/register');
 const dotenv = require("dotenv");
 
 // Environment config
-const nodeEnv = process.env.NODE_ENV || "development";
-const envFilePath = `.env.${nodeEnv}.local`;
+if (process.env.NODE_ENV !== 'production') {
+  require('dotenv').config();
+}
 dotenv.config({ path: envFilePath, debug: false });
 
 const config = require("@config");
