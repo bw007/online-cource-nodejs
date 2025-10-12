@@ -1,16 +1,17 @@
 const passport = require('passport');
 const GoogleStrategy = require('passport-google-oauth20').Strategy;
-const User = require('@/models/user.model');
 const logger = require('@/utils/logger');
+    const User = require('@/models/User');
 
 // Serialize user
 passport.serializeUser((user, done) => {
   done(null, user.id);
 });
 
-// Deserialize user
+// Deserialize user  
 passport.deserializeUser(async (id, done) => {
   try {
+    // Lazy load User model
     const user = await User.findById(id);
     done(null, user);
   } catch (error) {
@@ -25,10 +26,13 @@ if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
       {
         clientID: process.env.GOOGLE_CLIENT_ID,
         clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-        callbackURL: process.env.GOOGLE_CALLBACK_URL || 'http://localhost:3000/api/auth/google/callback',
+        callbackURL: process.env.GOOGLE_CALLBACK_URL || '/api/auth/google/callback',
       },
       async (accessToken, refreshToken, profile, done) => {
         try {
+          // Lazy load User model
+          const User = require('@/models/User');
+          
           // Check if user exists
           let user = await User.findOne({ email: profile.emails[0].value });
 
