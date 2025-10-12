@@ -1,7 +1,5 @@
 require('module-alias/register');
-const dotenv = require("dotenv");
 
-// Environment config
 if (process.env.NODE_ENV !== 'production') {
   require('dotenv').config();
 }
@@ -14,6 +12,8 @@ const { setupProcessErrorHandlers } = require('@/middlewares');
 
 async function startServer() {
   try {
+    const nodeEnv = process.env.NODE_ENV || 'development';
+    
     // Process error handlers
     setupProcessErrorHandlers();
 
@@ -26,9 +26,9 @@ async function startServer() {
     // initializeAdmin
     await initializeAdmin();
     
-     // Run Server
-     const server = app.listen(config.server.port, () => {
-      logger.info(`Server running on http://localhost:${config.server.port}/api (${nodeEnv})`);
+    // Run Server
+    const server = app.listen(config.server.port, '0.0.0.0', () => {
+      logger.info(`Server running on port ${config.server.port}`);
       logger.info(`Environment: ${nodeEnv}`);
       logger.info(`Database: ${config.database.getConnectionStatus()}`);
       logger.info(`Health check: http://localhost:${config.server.port}/api/health`);
@@ -44,10 +44,11 @@ async function startServer() {
     process.on('SIGTERM', () => gracefulShutdown(server));
     process.on('SIGINT', () => gracefulShutdown(server));
   } catch (error) {
-    logger.error(`Server running error: ${error.message}`);
+    logger.error(`Server startup error: ${error.message}`);
+    logger.error(error.stack);
     process.exit(1);
   }
-};
+}
 
 // Run server
 startServer();
