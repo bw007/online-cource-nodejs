@@ -1,11 +1,11 @@
 require('module-alias/register');
 const dotenv = require("dotenv");
 
-// Environment config
-const nodeEnv = process.env.NODE_ENV || "development";
-if (nodeEnv === "development") {
-  const envFilePath = `.env.${nodeEnv}.local`;
+if (process.env.NODE_ENV !== "production") {
+  const envFilePath = `.env.${process.env.NODE_ENV || "development"}.local`;
   dotenv.config({ path: envFilePath, debug: false });
+} else {
+  dotenv.config(); // Railway uchun kerak — Variables’dan o‘qiydi
 }
 
 const config = require("@config");
@@ -23,15 +23,14 @@ async function startServer() {
     await initializeAdmin();
 
     const PORT = process.env.PORT || config.server.port || 8080;
-
     const server = app.listen(PORT, () => {
-      logger.info(`Server running on port ${PORT} (${nodeEnv})`);
+      logger.info(`✅ Server running on port ${PORT} (${process.env.NODE_ENV})`);
     });
 
     process.on('SIGTERM', () => gracefulShutdown(server));
     process.on('SIGINT', () => gracefulShutdown(server));
   } catch (error) {
-    logger.error(`Server running error: ${error.message}`);
+    console.error("❌ Server error:", error);
     process.exit(1);
   }
 }
