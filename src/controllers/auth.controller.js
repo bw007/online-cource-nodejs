@@ -597,18 +597,15 @@ class AuthController {
    * @returns {Object} JSON response with new access token
    */
   async refreshToken(req, res) {
-    // Get refresh token from cookie or request body
     const refreshToken = req.cookies.refreshToken || req.body?.refreshToken;
-    console.log(req.cookies);
+    console.log("ref", req.cookies);
     
     if (!refreshToken) {
       return ResponseFormatter.unauthorized(res, jwtErrors.MISSING_TOKEN);
     }
 
-    // Verify refresh token signature and expiration
     const decoded = jwtConfig.verifyRefreshToken(refreshToken);
     
-    // Find user with token version and refresh token fields
     const user = await User.findById(decoded.id)
       .select('+refreshToken +tokenVersion');
 
@@ -616,22 +613,18 @@ class AuthController {
       return ResponseFormatter.unauthorized(res, authErrors.USER_NOT_FOUND);
     }
 
-    // Validate token version and refresh token match
     if (user.tokenVersion !== decoded.tokenVersion || user.refreshToken !== refreshToken) {
       return ResponseFormatter.unauthorized(res, authErrors.INVALID_SESSION);
     }
 
-    // Check if refresh token has expired
     if (user.refreshTokenExpiresAt < new Date()) {
       return ResponseFormatter.unauthorized(res, jwtErrors.REFRESH_EXPIRED);
     }
 
-    // Ensure account is still active
     if (!user.isActive) {
       return ResponseFormatter.forbidden(res, authErrors.ACCOUNT_DISABLED);
     }
 
-    // Generate new access token with current user data
     const newTokenVersion = uuidv4();
 
     const newAccessToken = jwtConfig.generateAccessToken({
@@ -641,10 +634,26 @@ class AuthController {
       tokenVersion: newTokenVersion
     });
 
-    // Update last token refresh timestamp
+    const newRefreshToken = jwtConfig.generateRefreshToken({
+      id: user._id,
+      tokenVersion: newTokenVersion
+    });
+
+    const refreshTokenExpiresAt = new Date();
+    refreshTokenExpiresAt.setDate(refreshTokenExpiresAt.getDate() + 30);
+
     await User.findByIdAndUpdate(user._id, {
       tokenVersion: newTokenVersion,
+      refreshToken: newRefreshToken,
+      refreshTokenExpiresAt: refreshTokenExpiresAt,
       lastTokenRefresh: new Date()
+    });
+
+    res.cookie('refreshToken', newRefreshToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      maxAge: 30 * 24 * 60 * 60 * 1000 // 30 days
     });
 
     logger.info(`Token refreshed for user: ${user._id}`);
@@ -653,6 +662,7 @@ class AuthController {
       ...jwtSuccess.TOKEN_REFRESHED,
       data: { 
         accessToken: newAccessToken,
+        refreshToken: newRefreshToken,
         user: {
           id: user._id,
           name: user.name,

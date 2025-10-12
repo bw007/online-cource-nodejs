@@ -392,7 +392,7 @@ class CourseController {
     const course = await Course.findOne({
       _id: req.params.id,
       isPublished: true
-    }).populate('instructor', 'name email');
+    }).populate('lessonsCount instructor', 'name email');
     
     if (!course) {
       return ResponseFormatter.notFound(res, courseErrors.COURSE_NOT_FOUND);
