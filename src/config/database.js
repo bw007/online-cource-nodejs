@@ -1,6 +1,5 @@
 const { default: mongoose } = require("mongoose");
-const { logger } = require("@utils");
-
+const logger = require("../utils/logger");
 /**
  * Handles MongoDB database connection using Mongoose.
  */

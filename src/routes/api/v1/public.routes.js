@@ -1,4 +1,3 @@
-// src/routes/api/v1/public.routes.js
 const express = require('express');
 const { asyncHandler } = require('@/middlewares');
 const { courseController, lessonController } = require('@/controllers');

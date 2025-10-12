@@ -8,6 +8,8 @@ class StudentController {
 
   async enrollInCourse(req, res) {
     const { courseId } = req.params;
+    console.log(courseId);
+    
     const studentId = req.user.id;
     
     const course = await Course.findOne({ 

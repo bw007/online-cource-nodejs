@@ -63,8 +63,12 @@ const CourseSchema = new mongoose.Schema({
 
 // Basic indexes
 CourseSchema.index({ instructor: 1 });
-CourseSchema.index({ isPublished: 1 });
 CourseSchema.index({ createdAt: -1 });
+
+CourseSchema.index({ title: 1 });
+CourseSchema.index({ category: 1, isPublished: 1 });
+CourseSchema.index({ price: 1 });
+CourseSchema.index({ studentsCount: -1 });
 
 // Virtual for lessons count
 CourseSchema.virtual('lessonsCount', {

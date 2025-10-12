@@ -132,7 +132,9 @@ class AuthController {
       role: user.role,
       avatar: user.avatar,
       isEmailVerified: user.isEmailVerified,
-      enrolledCourses: user.enrolledCourses
+      enrolledCourses: user.enrolledCourses,
+      favourites: user.favouriteCourses,
+      cart: user.cart,
     };
 
     // Set refresh token as httpOnly cookie
@@ -341,7 +343,9 @@ class AuthController {
       role: user.role,
       avatar: user.avatar,
       isEmailVerified: true,
-      enrolledCourses: user.enrolledCourses
+      enrolledCourses: user.enrolledCourses,
+      favourites: user.favouriteCourses,
+      cart: user.cart,
     };
 
     // Set refresh token as httpOnly cookie
@@ -997,7 +1001,9 @@ class AuthController {
       avatar: user.avatar,
       isEmailVerified: user.isEmailVerified,
       enrolledCourses: user.enrolledCourses,
-      lastLoginAt: user.lastLoginAt
+      lastLoginAt: user.lastLoginAt,
+      favourites: user.favouriteCourses,
+      cart: user.cart,
     };
 
     return ResponseFormatter.success(res, {

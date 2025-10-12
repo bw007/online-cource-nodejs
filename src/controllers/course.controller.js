@@ -336,40 +336,68 @@ class CourseController {
    * @returns {Object} JSON response with published courses
    */
   async getPublishedCourses(req, res) {
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 12;
-    const skip = (page - 1) * limit;
-    const { category, search } = req.query;
+    const { 
+      search, 
+      category, 
+      minPrice,
+      maxPrice,
+      sortBy,
+      page = 1, 
+      limit = 12 
+    } = req.query;
     
-    // Build filter
+    const skip = (page - 1) * limit;
+    
     const filter = { isPublished: true };
+    
+    if (search && search.trim()) {
+      const instructors = await Instructor.find({
+        name: { $regex: search.trim(), $options: 'i' }
+      }).select('_id');
+      
+      const instructorIds = instructors.map(inst => inst._id);
+      
+      filter.$or = [
+        { title: { $regex: search.trim(), $options: 'i' } },
+        { description: { $regex: search.trim(), $options: 'i' } },
+        { instructor: { $in: instructorIds } }
+      ];
+    }
     
     if (category) {
       filter.category = category;
     }
     
-    if (search) {
-      filter.$or = [
-        { title: { $regex: search, $options: 'i' } },
-        { description: { $regex: search, $options: 'i' } }
-      ];
+    if (minPrice || maxPrice) {
+      filter.price = {};
+      if (minPrice) filter.price.$gte = Number(minPrice);
+      if (maxPrice) filter.price.$lte = Number(maxPrice);
     }
     
+    let sort = { createdAt: -1 };
+    if (sortBy === 'price-asc') sort = { price: 1 };
+    if (sortBy === 'price-desc') sort = { price: -1 };
+    if (sortBy === 'popular') sort = { studentsCount: -1 };
+    if (sortBy === 'title') sort = { title: 1 };
+    
     const courses = await Course.find(filter)
+      .populate('instructor', 'name email avatar')
       .populate('lessonsCount')
-      .select('title description price thumbnail category studentsCount createdAt instructor')
-      .sort({ createdAt: -1 })
+      .select('title description price thumbnail category studentsCount createdAt')
+      .sort(sort)
       .skip(skip)
-      .limit(limit);
+      .limit(Number(limit));
     
     const total = await Course.countDocuments(filter);
+    
+    logger.info(`Courses fetched: search="${search}", category="${category}", total=${total}`);
     
     return ResponseFormatter.success(res, {
       ...courseSuccess.COURSES_FETCHED,
       data: {
         courses,
         pagination: {
-          current: page,
+          current: Number(page),
           total: Math.ceil(total / limit),
           count: courses.length,
           totalRecords: total

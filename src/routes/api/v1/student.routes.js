@@ -1,4 +1,3 @@
-// src/routes/api/v1/student.routes.js
 const express = require('express');
 const { authenticate, requireStudent, asyncHandler } = require('@/middlewares');
 const { studentController } = require('@/controllers');

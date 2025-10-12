@@ -1,4 +1,4 @@
-const config = require("../config");
+const database = require("../config/database");
 const logger = require("./logger");
 
 // Graceful shutdown function
@@ -10,7 +10,7 @@ async function gracefulShutdown(server) {
     // logger.info('HTTP server closed');
 
     // Close the database connection
-    await config.database.disconnect();
+    await database.disconnect();
 
     // logger.info('Server shut down successfully');
     process.exit(0);
