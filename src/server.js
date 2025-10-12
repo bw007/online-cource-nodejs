@@ -3,8 +3,12 @@ const dotenv = require("dotenv");
 
 // Environment config
 const nodeEnv = process.env.NODE_ENV || "development";
-const envFilePath = `.env.${nodeEnv}.local`;
-dotenv.config({ path: envFilePath, debug: false });
+
+// Faqat development'da .env fayl yukla
+if (nodeEnv === 'development') {
+  const envFilePath = `.env.${nodeEnv}.local`;
+  dotenv.config({ path: envFilePath, debug: false });
+}
 
 const config = require("@config");
 const app = require("@/app");
