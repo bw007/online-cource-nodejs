@@ -1,17 +1,16 @@
 const passport = require('passport');
 const GoogleStrategy = require('passport-google-oauth20').Strategy;
 const logger = require('@/utils/logger');
-    const User = require('@/models/User');
 
-// Serialize user
+// Serialize user (lazy load User model)
 passport.serializeUser((user, done) => {
   done(null, user.id);
 });
 
-// Deserialize user  
+// Deserialize user (lazy load User model)
 passport.deserializeUser(async (id, done) => {
   try {
-    // Lazy load User model
+    const User = require('@models/User');
     const user = await User.findById(id);
     done(null, user);
   } catch (error) {
@@ -21,6 +20,8 @@ passport.deserializeUser(async (id, done) => {
 
 // Google OAuth Strategy - ONLY if credentials exist
 if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
+  logger.info('⚙️  Configuring Google OAuth Strategy...');
+  
   passport.use(
     new GoogleStrategy(
       {
@@ -30,14 +31,14 @@ if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
       },
       async (accessToken, refreshToken, profile, done) => {
         try {
-          // Lazy load User model
-          const User = require('@/models/User');
+          // Lazy load User model ONLY when strategy is used
+          const User = require('@models/User');
           
           // Check if user exists
           let user = await User.findOne({ email: profile.emails[0].value });
 
           if (user) {
-            // User exists - update OAuth info if needed
+            // User exists
             if (!user.providerId) {
               user.provider = 'google';
               user.providerId = profile.id;
@@ -64,9 +65,10 @@ if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
       }
     )
   );
-  logger.info('✓ Google OAuth Strategy configured');
+  
+  logger.info('✅ Google OAuth Strategy configured');
 } else {
-  logger.warn('⚠ Google OAuth credentials not found - OAuth disabled');
+  logger.warn('⚠️  Google OAuth credentials not found - OAuth disabled');
 }
 
 module.exports = passport;
