@@ -1,37 +1,24 @@
-const nodemailer = require('nodemailer');
+const { Resend } = require('resend');
 const { logger } = require('@utils');
 
 class EmailService {
   constructor() {
-    // Email transporter configuration
-    this.transporter = nodemailer.createTransport({
-      host: process.env.EMAIL_HOST || 'smtp.gmail.com',
-      port: process.env.EMAIL_PORT || 587,
-      from: process.env.EMAIL_FROM || 'noreply@yourapp.com',
-      secure: false, // true for 465, false for other ports
-      auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASSWORD,
-      },
-    });
+    this.resend = new Resend(process.env.RESEND_API_KEY);
   }
 
-  /**
-   * Send OTP verification email
-   * @param {string} email - Recipient email
-   * @param {string} name - User name
-   * @param {string} otp - 6-digit OTP
-   */
   async sendOTPEmail(email, name, otp) {
     try {
-      const mailOptions = {
-        from: `"${process.env.APP_NAME || 'Video Course Platform'}" <${process.env.EMAIL_FROM}>`,
+      logger.info(`📧 Sending OTP to: ${email}`);
+      
+      const { data, error } = await this.resend.emails.send({
+        from: 'Hasanov Academy <onboarding@resend.dev>',
         to: email,
         subject: 'E-pochtani tekshirish - OTP kaliti',
         html: `
           <!DOCTYPE html>
           <html>
           <head>
+            <meta charset="UTF-8">
             <style>
               body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
               .container { max-width: 600px; margin: 0 auto; padding: 20px; }
@@ -64,20 +51,23 @@ class EmailService {
                 </div>
 
                 <div class="footer">
-                  <p>© ${new Date().getFullYear()} ${process.env.APP_NAME || 'Hasanov Academy'}</p>
+                  <p>© ${new Date().getFullYear()} Hasanov Academy</p>
                 </div>
               </div>
             </div>
           </body>
           </html>
         `,
-      };
+      });
 
-      await this.transporter.sendMail(mailOptions);
-      logger.info(`OTP email sent to ${email}`);
-      return true;
+      if (error) {
+        throw error;
+      }
+
+      logger.info(`✅ Email sent successfully. ID: ${data.id}`);
+      return { success: true, id: data.id };
     } catch (error) {
-      logger.error(`Failed to send OTP email: ${error.message}`);
+      logger.error(`❌ Failed to send email: ${error.message}`);
       throw error;
     }
   }
