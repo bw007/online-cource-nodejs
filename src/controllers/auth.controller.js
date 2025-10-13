@@ -209,7 +209,7 @@ class AuthController {
       email: email.toLowerCase().trim(),
       password,
       provider: PROVIDERS.LOCAL,
-      isEmailVerified: false,
+      isEmailVerified: true,
       emailVerificationOTP: otp,
       emailVerificationOTPExpires: otpExpiry,
       emailVerificationOTPAttempts: 0
